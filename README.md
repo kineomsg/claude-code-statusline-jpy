@@ -8,13 +8,13 @@ A statusline for [Claude Code](https://claude.ai/code) that shows model, rate li
 ## Preview
 
 ```
-Sonnet4.6(high) Session:45%(3h20m) Week:20%(2d3h) Ctx:▰▰▱▱▱40% Cost:▰▱▱▱▱~$0.15(¥230/¥500)
+Sonnet4.6(high) Session:45%(14:30) Week:20%(2d3h) Ctx:▰▰▱▱▱40% Cost:▰▱▱▱▱~$0.15(¥230/¥500)
 ```
 
 Over budget (Opus, subscription):
 
 ```
-!!Opus4.8(high) Session:72%(1h5m) Week:55%(1d3h) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰~$3.20(¥480/¥500) Acct:▰▰▱▱▱35%
+!!Opus4.8(high) Session:72%(15:05) Week:55%(1d3h) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰~$3.20(¥480/¥500) Acct:▰▰▱▱▱35%
 ```
 
 ## Features
@@ -22,7 +22,7 @@ Over budget (Opus, subscription):
 | Field | Description |
 |---|---|
 | `Sonnet4.6(high)` / `!!Opus4.8` | Model name and effort level; Opus is prefixed with `!!` |
-| `Session:XX%(XhYm)` | 5-hour rate limit usage and time until reset |
+| `Session:XX%(HH:MM)` | 5-hour rate limit usage and reset time (wall clock) |
 | `Week:XX%(XdXh)` | 7-day rate limit usage and time until reset |
 | `Ctx:▰▰▱▱▱XX%` | Context window usage (5-segment bar) |
 | `Cost:▰▱▱▱▱~$X.XX(¥XXX/¥500)` | Daily cost in USD + JPY with budget bar (`~` on subscription plans) |

@@ -22,9 +22,7 @@ function Get-ColorForPct($pct) {
 function Get-ResetHM($ts) {
     $diff = $ts - $now
     if ($diff -le 0) { return "soon" }
-    $h = [Math]::Floor($diff / 3600)
-    $m = [Math]::Floor(($diff % 3600) / 60)
-    return "${h}h${m}m"
+    return [DateTimeOffset]::FromUnixTimeSeconds($ts).LocalDateTime.ToString("HH:mm")
 }
 
 function Get-ResetDH($ts) {

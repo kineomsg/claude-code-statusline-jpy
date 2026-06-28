@@ -36,9 +36,7 @@ fmt_reset_hm() {
     [ -z "$1" ] && echo "soon" && return
     local diff=$(( $1 - now ))
     [ $diff -le 0 ] && echo "soon" && return
-    local h=$(( diff / 3600 ))
-    local m=$(( (diff % 3600) / 60 ))
-    echo "${h}h${m}m"
+    date -d "@$1" "+%H:%M" 2>/dev/null || date -r "$1" "+%H:%M" 2>/dev/null || echo "soon"
 }
 
 fmt_reset_dh() {
