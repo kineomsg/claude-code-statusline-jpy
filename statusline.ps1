@@ -40,6 +40,7 @@ function Get-ResetDH($ts) {
 # Model info
 $modelId      = $data.model.id
 $modelDisplay = $data.model.display_name
+$effort       = $data.effort.level
 
 # Rate limits
 $h5_pct   = if ($null -ne $data.rate_limits.five_hour.used_percentage)  { [int]$data.rate_limits.five_hour.used_percentage }  else { $null }
@@ -52,10 +53,11 @@ $ctx_pct  = if ($null -ne $data.context_window.used_percentage) { [int]$data.con
 $out = ""
 if ($modelDisplay) {
     $modelShort = $modelDisplay -replace ' ', ''
+    $modelStr   = if ($effort) { "${modelShort}(${effort})" } else { $modelShort }
     if ($modelId -match 'opus') {
-        $out = "${C_RED}!!${modelShort}${C_RESET}"
+        $out = "${C_RED}!!${modelStr}${C_RESET}"
     } else {
-        $out = "${C_PURPLE}${modelShort}${C_RESET}"
+        $out = "${C_PURPLE}${modelStr}${C_RESET}"
     }
 }
 
@@ -94,7 +96,47 @@ if ($null -eq $jpyRate) {
     try {
         $resp    = Invoke-RestMethod -Uri "https://api.frankfurter.app/latest?from=USD&to=JPY" -TimeoutSec 3
         $jpyRate = $resp.rates.JPY
-        "${now}:${jpyRate}" | Set-Content $jpyCachePath
+        "${now}:${jpyRate}" | Set-Content "${jpyCachePath}.tmp"
+        Move-Item -Force "${jpyCachePath}.tmp" $jpyCachePath
+    } catch {}
+}
+
+# Anthropic OAuth account usage (5-minute cache)
+$oauthCachePath = "$HOME\.claude\oauth_usage.cache"
+$oauthPct = $null
+if (Test-Path $oauthCachePath) {
+    $oauthAge = ((Get-Date) - (Get-Item $oauthCachePath).LastWriteTime).TotalSeconds
+    if ($oauthAge -lt 300) {
+        $oauthParts = (Get-Content $oauthCachePath -Raw).Trim() -split "`t", 3
+        if ($oauthParts.Count -ge 3) { $oauthPct = $oauthParts[2] -as [int] }
+    }
+}
+if ($null -eq $oauthPct) {
+    try {
+        $credPath = "$HOME\.claude\.credentials.json"
+        if (Test-Path $credPath) {
+            $cred  = Get-Content $credPath -Raw | ConvertFrom-Json
+            $token = $cred.claudeAiOauth.accessToken
+            if ($token) {
+                $headers = @{
+                    "Authorization"  = "Bearer $token"
+                    "anthropic-beta" = "oauth-2025-04-20"
+                    "Content-Type"   = "application/json"
+                }
+                $resp = Invoke-RestMethod -Uri "https://api.anthropic.com/api/oauth/usage" -Headers $headers -TimeoutSec 5
+                if ($resp.extra_usage.used_credits) {
+                    $pctVal = [int]($resp.extra_usage.utilization * 100)
+                    "$($resp.extra_usage.used_credits)`t$($resp.extra_usage.monthly_limit)`t${pctVal}" | Set-Content "${oauthCachePath}.tmp"
+                    Move-Item -Force "${oauthCachePath}.tmp" $oauthCachePath
+                    $oauthPct = $pctVal
+                } elseif ($resp.spend.used.amount_minor) {
+                    $pctVal = [int]($resp.spend.percent * 100)
+                    "$($resp.spend.used.amount_minor)`t$($resp.spend.limit.amount_minor)`t${pctVal}" | Set-Content "${oauthCachePath}.tmp"
+                    Move-Item -Force "${oauthCachePath}.tmp" $oauthCachePath
+                    $oauthPct = $pctVal
+                }
+            }
+        }
     } catch {}
 }
 
@@ -115,7 +157,8 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
     }
 
     if ($costUsd -lt $lastSessionUsd) { $cumulativeUsd += $lastSessionUsd }
-    "${curDate}:${cumulativeUsd}:${costUsd}" | Set-Content $budgetCachePath
+    "${curDate}:${cumulativeUsd}:${costUsd}" | Set-Content "${budgetCachePath}.tmp"
+    Move-Item -Force "${budgetCachePath}.tmp" $budgetCachePath
 
     $totalUsd = $cumulativeUsd + $costUsd
     $totalJpy = [int]($totalUsd * $jpyRate)
@@ -133,6 +176,17 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
         if ($out) { $out += " " }
         $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}${costEst}`$${costFmt}${C_RESET}(¥${totalJpy}/¥500)"
     }
+}
+
+# Account monthly usage (OAuth API, shown only when cache is available)
+if ($null -ne $oauthPct -and $oauthPct -gt 0) {
+    $oauthPctCapped = [Math]::Min($oauthPct, 100)
+    $filled    = [Math]::Min([Math]::Floor($oauthPctCapped / 20), 5)
+    $filledBar = "▰" * $filled
+    $emptyBar  = "▱" * (5 - $filled)
+    $c         = Get-ColorForPct $oauthPctCapped
+    if ($out) { $out += " " }
+    $out += "${C_DIM}Acct:${C_RESET}${c}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}${oauthPctCapped}%${C_RESET}"
 }
 
 Write-Host -NoNewline $out
