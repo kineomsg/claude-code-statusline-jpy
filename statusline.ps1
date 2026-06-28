@@ -46,6 +46,8 @@ $h5_reset = $data.rate_limits.five_hour.resets_at
 $d7_pct   = if ($null -ne $data.rate_limits.seven_day.used_percentage)  { [int]$data.rate_limits.seven_day.used_percentage }  else { $null }
 $d7_reset = $data.rate_limits.seven_day.resets_at
 $ctx_pct  = if ($null -ne $data.context_window.used_percentage) { [int]$data.context_window.used_percentage } else { $null }
+$hasRl    = ($null -ne $data.rate_limits)
+$costUsd  = $data.cost.total_cost_usd
 
 # Model prefix
 $out = ""
@@ -64,12 +66,18 @@ if ($null -ne $h5_pct) {
     $c   = Get-ColorForPct $h5_pct
     if ($out) { $out += " " }
     $out += "${C_DIM}Session:${C_RESET}${c}${h5_pct}%${C_DIM}(${rst})${C_RESET}"
+} elseif (!$hasRl -and $modelDisplay -and ($null -eq $costUsd -or $costUsd -eq 0.0)) {
+    if ($out) { $out += " " }
+    $out += "${C_DIM}Session:-${C_RESET}"
 }
 if ($null -ne $d7_pct) {
     $rst = Get-ResetDH $d7_reset
     $c   = Get-ColorForPct $d7_pct
     if ($out) { $out += " " }
     $out += "${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
+} elseif (!$hasRl -and $modelDisplay -and ($null -eq $costUsd -or $costUsd -eq 0.0)) {
+    if ($out) { $out += " " }
+    $out += "${C_DIM}Week:-${C_RESET}"
 }
 if ($null -ne $ctx_pct) {
     $filled     = [Math]::Max(0, [Math]::Min([Math]::Floor($ctx_pct / 20), 5))
@@ -147,7 +155,6 @@ if ($null -eq $oauthPct) {
 }
 
 # Daily cost tracking (¥500/day — ¥10,000/month ÷ 20 business days)
-$costUsd = $data.cost.total_cost_usd
 if ($null -ne $costUsd -and $null -ne $jpyRate) {
     $budgetCachePath = "$HOME\.claude\cost_budget.cache"
     $curDate         = (Get-Date).ToString("yyyy-MM-dd")
