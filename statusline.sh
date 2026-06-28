@@ -56,9 +56,9 @@ JPY_CACHE="$HOME/.claude/jpy_rate.cache"
 JPY_LOCK="$HOME/.claude/jpy_rate.lock"
 jpy_rate=""
 if [ -f "$JPY_CACHE" ]; then
-    cached_ts=$(cut -d: -f1 "$JPY_CACHE")
-    cached_rate=$(cut -d: -f2 "$JPY_CACHE")
-    if [ $(( now - cached_ts )) -lt 604800 ] && [ -n "$cached_rate" ]; then
+    cached_ts=$(cut -d: -f1 "$JPY_CACHE" | head -n 1)
+    cached_rate=$(cut -d: -f2 "$JPY_CACHE" | head -n 1)
+    if [[ "$cached_ts" =~ ^[0-9]+$ ]] && [ $(( now - cached_ts )) -lt 604800 ] && [ -n "$cached_rate" ]; then
         jpy_rate="$cached_rate"
     fi
 fi
@@ -86,28 +86,30 @@ if [ -f "$OAUTH_CACHE" ]; then
         oauth_pct=$(cut -f3 "$OAUTH_CACHE" 2>/dev/null)
     fi
 fi
-lock_age=$(( now - $(stat_mtime "$OAUTH_LOCK") ))
-if [ "$lock_age" -gt 60 ]; then
-    touch "$OAUTH_LOCK" 2>/dev/null
-    (
-        token=$(jq -r '.claudeAiOauth.accessToken // empty' "$HOME/.claude/.credentials.json" 2>/dev/null)
-        if [ -n "$token" ]; then
-            json=$(curl -sf --max-time 10 "https://api.anthropic.com/api/oauth/usage" \
-                -H "Authorization: Bearer $token" \
-                -H "anthropic-beta: oauth-2025-04-20" \
-                -H "Content-Type: application/json" 2>/dev/null)
-            result=$(printf '%s' "$json" | jq -r '
-                if .extra_usage.used_credits then
-                    [.extra_usage.used_credits, .extra_usage.monthly_limit, (.extra_usage.utilization * 100 | floor)] | @tsv
-                elif .spend.used.amount_minor then
-                    [.spend.used.amount_minor, .spend.limit.amount_minor, (.spend.percent * 100 | floor)] | @tsv
-                else empty end' 2>/dev/null)
-            if [ -n "$result" ]; then
-                printf '%s' "$result" > "${OAUTH_CACHE}.tmp" && mv "${OAUTH_CACHE}.tmp" "$OAUTH_CACHE"
+if [ -z "$oauth_pct" ]; then
+    lock_age=$(( now - $(stat_mtime "$OAUTH_LOCK") ))
+    if [ "$lock_age" -gt 60 ]; then
+        touch "$OAUTH_LOCK" 2>/dev/null
+        (
+            token=$(jq -r '.claudeAiOauth.accessToken // empty' "$HOME/.claude/.credentials.json" 2>/dev/null)
+            if [ -n "$token" ]; then
+                json=$(curl -sf --max-time 10 "https://api.anthropic.com/api/oauth/usage" \
+                    -H "Authorization: Bearer $token" \
+                    -H "anthropic-beta: oauth-2025-04-20" \
+                    -H "Content-Type: application/json" 2>/dev/null)
+                result=$(printf '%s' "$json" | jq -r '
+                    if .extra_usage.used_credits then
+                        [.extra_usage.used_credits, .extra_usage.monthly_limit, (.extra_usage.utilization * 100 | floor)] | @tsv
+                    elif .spend.used.amount_minor then
+                        [.spend.used.amount_minor, .spend.limit.amount_minor, (.spend.percent * 100 | floor)] | @tsv
+                    else empty end' 2>/dev/null)
+                if [ -n "$result" ]; then
+                    printf '%s' "$result" > "${OAUTH_CACHE}.tmp" && mv "${OAUTH_CACHE}.tmp" "$OAUTH_CACHE"
+                fi
             fi
-        fi
-        rm -f "$OAUTH_LOCK"
-    ) >/dev/null 2>&1 &
+            rm -f "$OAUTH_LOCK"
+        ) >/dev/null 2>&1 &
+    fi
 fi
 
 # === Build output ===
@@ -148,8 +150,8 @@ if [ -n "$ctx_pct" ]; then
     empty=$(( 5 - filled ))
     c=$(color_for_pct "$ctx_pct")
     filled_bar="" empty_bar=""
-    for i in $(seq 1 $filled 2>/dev/null); do filled_bar="${filled_bar}▰"; done
-    for i in $(seq 1 $empty 2>/dev/null); do empty_bar="${empty_bar}▱"; done
+    for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
+    for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Ctx:${C_RESET}${c}${filled_bar}${C_DIM}${empty_bar}${C_RESET}${c}${ctx_pct}%${C_RESET}"
 fi
@@ -175,7 +177,7 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
     printf '%s:%s:%s' "$cur_date" "$cumulative_usd" "$cost_usd" > "${BUDGET_CACHE}.tmp" && mv "${BUDGET_CACHE}.tmp" "$BUDGET_CACHE"
 
     total_usd=$(echo "$cumulative_usd + $cost_usd" | bc)
-    total_jpy=$(echo "scale=6; $total_usd * $jpy_rate" | bc | awk '{printf "%d", $1}')
+    total_jpy=$(echo "scale=6; $total_usd * $jpy_rate" | bc | awk '{printf "%d", $1 + 0.5}')
 
     if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
         budget_jpy=500
@@ -185,8 +187,8 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
         empty=$(( 5 - filled ))
         c=$(color_for_pct "$pct")
         filled_bar="" empty_bar=""
-        for i in $(seq 1 $filled 2>/dev/null); do filled_bar="${filled_bar}▰"; done
-        for i in $(seq 1 $empty 2>/dev/null); do empty_bar="${empty_bar}▱"; done
+        for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
+        for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
         bar="${filled_bar}${C_DIM}${empty_bar}"
         cost_fmt=$(printf "%.2f" "$total_usd")
         [ -n "$out" ] && out="$out "
@@ -206,8 +208,8 @@ if [ -n "$oauth_pct" ] && [ "$oauth_pct" -gt 0 ] 2>/dev/null; then
     empty=$(( 5 - filled ))
     c=$(color_for_pct "$oauth_pct")
     filled_bar="" empty_bar=""
-    for i in $(seq 1 $filled 2>/dev/null); do filled_bar="${filled_bar}▰"; done
-    for i in $(seq 1 $empty 2>/dev/null); do empty_bar="${empty_bar}▱"; done
+    for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
+    for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Acct:${C_RESET}${c}${filled_bar}${C_DIM}${empty_bar}${C_RESET}${c}${oauth_pct}%${C_RESET}"
 fi

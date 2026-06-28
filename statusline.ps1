@@ -61,20 +61,20 @@ if ($modelDisplay) {
     }
 }
 
-if ($null -ne $h5_pct -and $h5_pct -gt 0) {
+if ($null -ne $h5_pct) {
     $rst = Get-ResetHM $h5_reset
     $c   = Get-ColorForPct $h5_pct
     if ($out) { $out += " " }
     $out += "${C_DIM}Session:${C_RESET}${c}${h5_pct}%${C_DIM}(${rst})${C_RESET}"
 }
-if ($null -ne $d7_pct -and $d7_pct -gt 0) {
+if ($null -ne $d7_pct) {
     $rst = Get-ResetDH $d7_reset
     $c   = Get-ColorForPct $d7_pct
     if ($out) { $out += " " }
     $out += "${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
 }
 if ($null -ne $ctx_pct) {
-    $filled     = [Math]::Min([Math]::Floor($ctx_pct / 20), 5)
+    $filled     = [Math]::Max(0, [Math]::Min([Math]::Floor($ctx_pct / 20), 5))
     $filledBar  = "▰" * $filled
     $emptyBar   = "▱" * (5 - $filled)
     $c          = Get-ColorForPct $ctx_pct
@@ -86,18 +86,23 @@ if ($null -ne $ctx_pct) {
 $jpyCachePath = "$HOME\.claude\jpy_rate.cache"
 $jpyRate = $null
 if (Test-Path $jpyCachePath) {
-    $parts = (Get-Content $jpyCachePath -Raw).Trim() -split ":", 2
-    $cachTs = $parts[0] -as [long]
-    if ($parts.Count -eq 2 -and $null -ne $cachTs -and ($now - $cachTs) -lt 604800) {
-        $jpyRate = $parts[1] -as [double]
+    $content = Get-Content $jpyCachePath -Raw
+    if ($null -ne $content) {
+        $parts = $content.Trim() -split ":", 2
+        $cachTs = $parts[0] -as [long]
+        if ($parts.Count -eq 2 -and $null -ne $cachTs -and ($now - $cachTs) -lt 604800) {
+            $jpyRate = $parts[1] -as [double]
+        }
     }
 }
 if ($null -eq $jpyRate) {
     try {
-        $resp    = Invoke-RestMethod -Uri "https://api.frankfurter.app/latest?from=USD&to=JPY" -TimeoutSec 3
+        $resp    = Invoke-RestMethod -Uri "https://api.frankfurter.app/latest?from=USD&to=JPY"
         $jpyRate = $resp.rates.JPY
-        "${now}:${jpyRate}" | Set-Content "${jpyCachePath}.tmp"
-        Move-Item -Force "${jpyCachePath}.tmp" $jpyCachePath
+        if ($null -ne $jpyRate) {
+            "${now}:${jpyRate}" | Set-Content "${jpyCachePath}.tmp"
+            Move-Item -Force "${jpyCachePath}.tmp" $jpyCachePath
+        }
     } catch {}
 }
 
@@ -107,8 +112,11 @@ $oauthPct = $null
 if (Test-Path $oauthCachePath) {
     $oauthAge = ((Get-Date) - (Get-Item $oauthCachePath).LastWriteTime).TotalSeconds
     if ($oauthAge -lt 300) {
-        $oauthParts = (Get-Content $oauthCachePath -Raw).Trim() -split "`t", 3
-        if ($oauthParts.Count -ge 3) { $oauthPct = $oauthParts[2] -as [int] }
+        $oauthContent = Get-Content $oauthCachePath -Raw
+        if ($null -ne $oauthContent) {
+            $oauthParts = $oauthContent.Trim() -split "`t", 3
+            if ($oauthParts.Count -ge 3) { $oauthPct = $oauthParts[2] -as [int] }
+        }
     }
 }
 if ($null -eq $oauthPct) {
@@ -123,7 +131,7 @@ if ($null -eq $oauthPct) {
                     "anthropic-beta" = "oauth-2025-04-20"
                     "Content-Type"   = "application/json"
                 }
-                $resp = Invoke-RestMethod -Uri "https://api.anthropic.com/api/oauth/usage" -Headers $headers -TimeoutSec 5
+                $resp = Invoke-RestMethod -Uri "https://api.anthropic.com/api/oauth/usage" -Headers $headers
                 if ($resp.extra_usage.used_credits) {
                     $pctVal = [int]($resp.extra_usage.utilization * 100)
                     "$($resp.extra_usage.used_credits)`t$($resp.extra_usage.monthly_limit)`t${pctVal}" | Set-Content "${oauthCachePath}.tmp"
@@ -149,10 +157,13 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
     $lastSessionUsd  = 0.0
 
     if (Test-Path $budgetCachePath) {
-        $parts = (Get-Content $budgetCachePath -Raw).Trim() -split ":", 3
-        if ($parts.Count -eq 3 -and $parts[0] -eq $curDate) {
-            $cu = $parts[1] -as [double]; if ($null -ne $cu) { $cumulativeUsd  = $cu }
-            $ls = $parts[2] -as [double]; if ($null -ne $ls) { $lastSessionUsd = $ls }
+        $budgetContent = Get-Content $budgetCachePath -Raw
+        if ($null -ne $budgetContent) {
+            $parts = $budgetContent.Trim() -split ":", 3
+            if ($parts.Count -eq 3 -and $parts[0] -eq $curDate) {
+                $cu = $parts[1] -as [double]; if ($null -ne $cu) { $cumulativeUsd  = $cu }
+                $ls = $parts[2] -as [double]; if ($null -ne $ls) { $lastSessionUsd = $ls }
+            }
         }
     }
 
@@ -181,7 +192,7 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
 # Account monthly usage (OAuth API, shown only when cache is available)
 if ($null -ne $oauthPct -and $oauthPct -gt 0) {
     $oauthPctCapped = [Math]::Min($oauthPct, 100)
-    $filled    = [Math]::Min([Math]::Floor($oauthPctCapped / 20), 5)
+    $filled    = [Math]::Max(0, [Math]::Min([Math]::Floor($oauthPctCapped / 20), 5))
     $filledBar = "▰" * $filled
     $emptyBar  = "▱" * (5 - $filled)
     $c         = Get-ColorForPct $oauthPctCapped
@@ -189,4 +200,4 @@ if ($null -ne $oauthPct -and $oauthPct -gt 0) {
     $out += "${C_DIM}Acct:${C_RESET}${c}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}${oauthPctCapped}%${C_RESET}"
 }
 
-Write-Host -NoNewline $out
+[Console]::Write($out)
