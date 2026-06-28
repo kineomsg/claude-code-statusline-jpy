@@ -30,6 +30,7 @@ Session:45%(14:30) Week:2d30m(3d12h) Ctx:▰▰▱▱▱40% Cost:!!▰▰▰▰�
 - Accumulates cost across sessions within the same month
 - Resets automatically on the 1st of each month
 - Exchange rate fetched weekly from ECB (European Central Bank) via [frankfurter.app](https://www.frankfurter.app/)
+- If the exchange rate API is unreachable (e.g. corporate network restrictions), falls back to ¥160/USD and shows a `~` prefix: `Cost:▰▰▰▱▱$3.42(~¥3.4k/¥10k)`
 - **Not shown on subscription plans (Pro/Max)** — cost data is only available on API key or Azure AI Foundry usage
 - Shows `!!` prefix when the ¥10,000 monthly budget is exceeded
 
@@ -182,7 +183,7 @@ If you get `command not found` for `jq` or `bc`, installing the missing tool wil
 
 - **Subscription plans (Pro/Max) do not expose cost data** — the Cost field will not appear. Only API key usage and Azure AI Foundry are supported.
 - Costs shown are estimates based on Claude Code's reported token usage and may not exactly match your Anthropic invoice
-- JPY conversion uses a weekly-cached exchange rate from ECB and will not reflect real-time fluctuations
+- JPY conversion uses a weekly-cached exchange rate from ECB and will not reflect real-time fluctuations. Falls back to ¥160/USD if the API is unreachable (indicated by `~` prefix)
 - When using Azure AI Foundry, costs are estimated based on Anthropic's public pricing and may differ from your actual Azure bill
 
 ## License
