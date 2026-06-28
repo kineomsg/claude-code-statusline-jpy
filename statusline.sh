@@ -28,6 +28,7 @@ d7_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty'
 d7_reset=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
 
 fmt_reset_hm() {
+    [ -z "$1" ] && echo "soon" && return
     local diff=$(( $1 - now ))
     [ $diff -le 0 ] && echo "soon" && return
     local h=$(( diff / 3600 ))
@@ -36,6 +37,7 @@ fmt_reset_hm() {
 }
 
 fmt_reset_dh() {
+    [ -z "$1" ] && echo "soon" && return
     local diff=$(( $1 - now ))
     [ $diff -le 0 ] && echo "soon" && return
     local d=$(( diff / 86400 ))
@@ -93,6 +95,7 @@ if [ -n "$d7_pct" ]; then
 fi
 if [ -n "$ctx_pct" ]; then
     filled=$(( ctx_pct / 20 ))
+    [ $filled -gt 5 ] && filled=5
     empty=$(( 5 - filled ))
     c=$(color_for_pct "$ctx_pct")
     filled_bar="" empty_bar=""
@@ -124,7 +127,7 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
     echo "${cur_date}:${cumulative_usd}:${cost_usd}" > "$BUDGET_CACHE"
 
     total_usd=$(echo "$cumulative_usd + $cost_usd" | bc)
-    total_jpy=$(echo "scale=2; $total_usd * $jpy_rate" | bc | cut -d. -f1)
+    total_jpy=$(echo "scale=6; $total_usd * $jpy_rate" | bc | awk '{printf "%d", $1}')
 
     if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
         budget_jpy=500

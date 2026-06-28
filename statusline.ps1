@@ -1,6 +1,7 @@
 param()
 $raw  = [Console]::In.ReadToEnd()
-$data = $raw | ConvertFrom-Json
+try { $data = $raw | ConvertFrom-Json } catch { exit 0 }
+if ($null -eq $data) { exit 0 }
 $now  = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 
 # === Color Palette (Claude Gradient) ===
@@ -71,7 +72,7 @@ if ($null -ne $d7_pct -and $d7_pct -gt 0) {
     $out += "${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
 }
 if ($null -ne $ctx_pct) {
-    $filled     = [Math]::Floor($ctx_pct / 20)
+    $filled     = [Math]::Min([Math]::Floor($ctx_pct / 20), 5)
     $filledBar  = "▰" * $filled
     $emptyBar   = "▱" * (5 - $filled)
     $c          = Get-ColorForPct $ctx_pct
@@ -84,8 +85,9 @@ $jpyCachePath = "$HOME\.claude\jpy_rate.cache"
 $jpyRate = $null
 if (Test-Path $jpyCachePath) {
     $parts = (Get-Content $jpyCachePath -Raw).Trim() -split ":", 2
-    if ($parts.Count -eq 2 -and ($now - [long]$parts[0]) -lt 604800) {
-        $jpyRate = [double]$parts[1]
+    $cachTs = $parts[0] -as [long]
+    if ($parts.Count -eq 2 -and $null -ne $cachTs -and ($now - $cachTs) -lt 604800) {
+        $jpyRate = $parts[1] -as [double]
     }
 }
 if ($null -eq $jpyRate) {
@@ -107,8 +109,8 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
     if (Test-Path $budgetCachePath) {
         $parts = (Get-Content $budgetCachePath -Raw).Trim() -split ":", 3
         if ($parts.Count -eq 3 -and $parts[0] -eq $curDate) {
-            $cumulativeUsd  = [double]$parts[1]
-            $lastSessionUsd = [double]$parts[2]
+            $cu = $parts[1] -as [double]; if ($null -ne $cu) { $cumulativeUsd  = $cu }
+            $ls = $parts[2] -as [double]; if ($null -ne $ls) { $lastSessionUsd = $ls }
         }
     }
 
