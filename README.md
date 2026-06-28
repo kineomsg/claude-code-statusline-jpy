@@ -14,7 +14,7 @@ Sonnet4.6(high) Session:45%(14:30) Week:20%(2d3h) Ctx:▰▰▱▱▱40% Cost:�
 Over budget (Opus, subscription):
 
 ```
-!!Opus4.8(high) Session:72%(15:05) Week:55%(1d3h) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰~$3.20(¥480/¥500) Acct:▰▰▱▱▱35%
+!!Opus4.8(high) Session:72%(15:05) Week:55%(1d3h) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰~$3.20(¥510/¥500) Acct:▰▰▱▱▱35%
 ```
 
 ## Features
