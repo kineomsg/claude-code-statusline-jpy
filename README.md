@@ -19,10 +19,10 @@ Subscription user (Max — rate limits not reported by API):
 Sonnet4.6(high) Session:- Week:- Ctx:▰▰▱▱▱40%
 ```
 
-API key user with spending limit:
+API key user with spending limit (second session of the day):
 
 ```
-Sonnet4.6(high) Ctx:▰▰▱▱▱40% Cost:▰▱▱▱▱(¥67 Today:¥67/¥500) Acct:▰▱▱▱▱15%
+Sonnet4.6(high) Ctx:▰▰▱▱▱40% Cost:▰▱▱▱▱(¥67 Today:¥180/¥500) Acct:▰▱▱▱▱15%
 ```
 
 API key user, over daily budget (multiple sessions — current session ¥200, daily total ¥510):
