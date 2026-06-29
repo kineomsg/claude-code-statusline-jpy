@@ -164,7 +164,7 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
         warn=""
         [ $pct -ge 100 ] && warn="!!"
         cost_fmt=$(printf "%.2f" "$total_usd")
-        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}\$${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
+        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}\$${cost_fmt}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_DIM})${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500${C_RESET}"
     fi
 fi
 

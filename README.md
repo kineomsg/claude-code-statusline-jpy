@@ -22,13 +22,13 @@ Sonnet4.6(high) Session:- Week:- Ctx:▰▰▱▱▱40%
 API key user with spending limit (2nd session of the day):
 
 ```
-Sonnet4.6(high) Ctx:▰▰▱▱▱40% Cost:▰▰▱▱▱$1.27(¥67 Today:¥200/¥500)
+Sonnet4.6(high) Ctx:▰▰▱▱▱40% Cost:▰▰▱▱▱$1.27(¥67) Today:¥200/¥500
 ```
 
 API key user, over daily budget:
 
 ```
-!!Opus4.8(high) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰$3.20(¥200 Today:¥510/¥500)
+!!Opus4.8(high) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰$3.20(¥200) Today:¥510/¥500
 ```
 
 ## Features
@@ -39,7 +39,7 @@ API key user, over daily budget:
 | `Session:XX%(HH:MM)` / `Session:-` | 5-hour rate limit usage and reset time; shows `-` on Max when the API doesn't report limits |
 | `Week:XX%(XdXh)` / `Week:-` | 7-day rate limit usage and time until reset; shows `-` on Max when the API doesn't report limits |
 | `Ctx:▰▰▱▱▱XX%` | Context window usage (5-segment bar) |
-| `Cost:▰▱▱▱▱$X.XX(¥XXX Today:¥XXX/¥500)` | Daily total in USD, current session and daily total in JPY with budget bar |
+| `Cost:▰▱▱▱▱$X.XX(¥XXX) Today:¥XXX/¥500` | Daily total in USD, current session cost in JPY, and daily total vs budget |
 
 **Cost display behavior:**
 - First value (`¥XXX`) is the **current session** cost; `Today:¥XXX/¥500` is the **daily cumulative** total across all sessions

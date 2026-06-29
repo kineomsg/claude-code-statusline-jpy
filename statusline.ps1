@@ -141,7 +141,7 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
         $warn       = if ($pct -ge 100) { "!!" } else { "" }
         $costFmt    = "{0:F2}" -f $totalUsd
         if ($out) { $out += " " }
-        $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpy}${C_DIM}/¥500)${C_RESET}"
+        $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${costFmt}${C_DIM}(${C_RESET}${c}¥${sessionJpy}${C_DIM})${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpy}${C_DIM}/¥500${C_RESET}"
     }
 }
 
