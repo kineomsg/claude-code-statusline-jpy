@@ -9,8 +9,8 @@ $ESC      = [char]0x1b
 $C_RESET  = "$ESC[0m"
 $C_PURPLE = "$ESC[38;2;167;139;250m"   # model name
 $C_GREEN  = "$ESC[38;2;130;180;100m"   # healthy (<60%)
-$C_AMBER  = "$ESC[38;2;229;192;123m"   # warning (>=60%)
-$C_RED    = "$ESC[38;2;224;108;117m"   # critical (>=80%) / Opus !!
+$C_AMBER  = "$ESC[38;2;229;192;123m"   # warning (>=60%) / Opus !
+$C_RED    = "$ESC[38;2;224;108;117m"   # critical (>=80%) / Fable !!
 $C_DIM    = "$ESC[38;2;92;99;112m"     # labels
 
 function Get-ColorForPct($pct) {
@@ -59,6 +59,8 @@ if ($modelDisplay) {
     $modelShort = $modelDisplay -replace ' ', ''
     $modelStr   = if ($effort) { "${modelShort}(${effort})" } else { $modelShort }
     if ($modelId -match 'opus') {
+        $out = "${C_AMBER}!${modelStr}${C_RESET}"
+    } elseif ($modelId -match 'fable') {
         $out = "${C_RED}!!${modelStr}${C_RESET}"
     } else {
         $out = "${C_PURPLE}${modelStr}${C_RESET}"

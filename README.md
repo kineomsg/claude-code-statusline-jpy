@@ -28,14 +28,20 @@ Sonnet4.6(high) Ctx:▰▰▱▱▱40% Cost:▰▰▱▱▱$1.27(¥67 Today:¥20
 API key user, over daily budget:
 
 ```
-!!Opus4.8(high) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰$3.20(¥200 Today:¥510/¥500)
+!Opus4.8(high) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰$3.20(¥200 Today:¥510/¥500)
+```
+
+Fable5 user:
+
+```
+!!Fable5 Ctx:▰▰▱▱▱40%
 ```
 
 ## Features
 
 | Field | Description |
 |---|---|
-| `Sonnet4.6(high)` / `!!Opus4.8` | Model name and effort level; Opus is prefixed with `!!` |
+| `Sonnet4.6(high)` / `!Opus4.8` / `!!Fable5` | Model name and effort level; Opus is prefixed with amber `!`, Fable5 with red `!!` |
 | `Session:XX%(HH:MM)` / `Session:-` | 5-hour rate limit usage and reset time; shows `-` on Max when the API doesn't report limits |
 | `Week:XX%(XdXh)` / `Week:-` | 7-day rate limit usage and time until reset; shows `-` on Max when the API doesn't report limits |
 | `Ctx:▰▰▱▱▱XX%` | Context window usage (5-segment bar) |

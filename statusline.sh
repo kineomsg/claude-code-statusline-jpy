@@ -6,8 +6,8 @@ now=$(date +%s)
 C_RESET=$'\e[0m'
 C_PURPLE=$'\e[38;2;167;139;250m'   # model name
 C_GREEN=$'\e[38;2;130;180;100m'    # healthy (<60%)
-C_AMBER=$'\e[38;2;229;192;123m'    # warning (>=60%)
-C_RED=$'\e[38;2;224;108;117m'      # critical (>=80%) / Opus !!
+C_AMBER=$'\e[38;2;229;192;123m'    # warning (>=60%) / Opus !
+C_RED=$'\e[38;2;224;108;117m'      # critical (>=80%) / Fable !!
 C_DIM=$'\e[38;2;92;99;112m'        # labels
 
 color_for_pct() {
@@ -84,6 +84,8 @@ if [ -n "$model_display" ]; then
     model_str="${model_short}"
     [ -n "$effort" ] && model_str="${model_str}(${effort})"
     if [[ "$model_id" == *"opus"* ]]; then
+        out="${C_AMBER}!${model_str}${C_RESET}"
+    elif [[ "$model_id" == *"fable"* ]]; then
         out="${C_RED}!!${model_str}${C_RESET}"
     else
         out="${C_PURPLE}${model_str}${C_RESET}"
