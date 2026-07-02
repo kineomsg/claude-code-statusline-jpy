@@ -30,8 +30,24 @@ eval "$(echo "$input" | jq -r '
     "d7_reset="      + (if .rate_limits.seven_day.resets_at != null then (.rate_limits.seven_day.resets_at | tostring) else "" end | @sh) + "\n" +
     "ctx_pct="       + (if .context_window.used_percentage != null then (.context_window.used_percentage | floor | tostring) else "" end | @sh) + "\n" +
     "cost_usd="      + (if .cost.total_cost_usd != null then (.cost.total_cost_usd | tostring) else "" end | @sh) + "\n" +
+    "cwd="           + (.cwd // "" | @sh) + "\n" +
     "has_rl="        + (if .rate_limits != null then "1" else "" end | @sh)
 ' 2>/dev/null)"
+
+# === Gauge fallback cache (Claude Code omits context_window/rate_limits briefly after a mid-session model switch) ===
+GAUGE_CACHE="$HOME/.claude/statusline_gauges.cache"
+GAUGE_TTL=20
+if [ -f "$GAUGE_CACHE" ]; then
+    IFS='|' read -r g_cwd g_ctx g_h5 g_h5r g_d7 g_d7r g_ts < "$GAUGE_CACHE"
+    if [ "$g_cwd" = "$cwd" ] && [ -n "$cwd" ] && [[ "$g_ts" =~ ^[0-9]+$ ]] && [ $(( now - g_ts )) -lt $GAUGE_TTL ]; then
+        [ -z "$ctx_pct" ] && [ -n "$g_ctx" ] && ctx_pct="$g_ctx"
+        [ -z "$h5_pct" ] && [ -n "$g_h5" ] && h5_pct="$g_h5" && h5_reset="$g_h5r"
+        [ -z "$d7_pct" ] && [ -n "$g_d7" ] && d7_pct="$g_d7" && d7_reset="$g_d7r"
+    fi
+fi
+if [ -n "$cwd" ] && { [ -n "$ctx_pct" ] || [ -n "$h5_pct" ] || [ -n "$d7_pct" ]; }; then
+    echo "${cwd}|${ctx_pct}|${h5_pct}|${h5_reset}|${d7_pct}|${d7_reset}|${now}" > "$GAUGE_CACHE"
+fi
 
 fmt_reset_hm() {
     [ -z "$1" ] && echo "soon" && return

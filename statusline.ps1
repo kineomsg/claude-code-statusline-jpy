@@ -46,6 +46,25 @@ $h5_reset = $data.rate_limits.five_hour.resets_at
 $d7_pct   = if ($null -ne $data.rate_limits.seven_day.used_percentage)  { [int]$data.rate_limits.seven_day.used_percentage }  else { $null }
 $d7_reset = $data.rate_limits.seven_day.resets_at
 $ctx_pct  = if ($null -ne $data.context_window.used_percentage) { [int]$data.context_window.used_percentage } else { $null }
+$cwd      = $data.cwd
+
+# === Gauge fallback cache (Claude Code omits context_window/rate_limits briefly after a mid-session model switch) ===
+$gaugeCache = Join-Path $HOME '.claude/statusline_gauges.cache'
+$gaugeTtl = 20
+if (Test-Path $gaugeCache) {
+    $parts = (Get-Content $gaugeCache -Raw).Trim().Split('|')
+    if ($parts.Count -eq 7) {
+        $gCwd, $gCtx, $gH5, $gH5r, $gD7, $gD7r, $gTs = $parts
+        if ($gCwd -eq $cwd -and $cwd -and (($now - [long]$gTs) -lt $gaugeTtl)) {
+            if (-not $ctx_pct -and $gCtx) { $ctx_pct = [int]$gCtx }
+            if (-not $h5_pct -and $gH5)   { $h5_pct = [int]$gH5; $gH5r = [long]$gH5r; $h5_reset = [long]$gH5r }
+            if (-not $d7_pct -and $gD7)   { $d7_pct = [int]$gD7; $gD7r = [long]$gD7r; $d7_reset = [long]$gD7r }
+        }
+    }
+}
+if ($cwd -and ($ctx_pct -or $h5_pct -or $d7_pct)) {
+    "$cwd|$ctx_pct|$h5_pct|$h5_reset|$d7_pct|$d7_reset|$now" | Set-Content $gaugeCache
+}
 
 # Max subscribers: rate_limits is absent from the API response entirely (upstream bug).
 # Show "-" placeholders instead of silently dropping the fields.
