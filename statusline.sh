@@ -46,7 +46,7 @@ if [ -f "$GAUGE_CACHE" ]; then
     fi
 fi
 if [ -n "$cwd" ] && { [ -n "$ctx_pct" ] || [ -n "$h5_pct" ] || [ -n "$d7_pct" ]; }; then
-    echo "${cwd}|${ctx_pct}|${h5_pct}|${h5_reset}|${d7_pct}|${d7_reset}|${now}" > "$GAUGE_CACHE"
+    echo "${cwd}|${ctx_pct}|${h5_pct}|${h5_reset:-0}|${d7_pct}|${d7_reset:-0}|${now}" > "$GAUGE_CACHE"
 fi
 
 fmt_reset_hm() {
@@ -114,7 +114,7 @@ if [ -n "$h5_pct" ]; then
     c=$(color_for_pct "$h5_pct")
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Session:${C_RESET}${c}${h5_pct}%${C_DIM}(${rst})${C_RESET}"
-elif [ -z "$has_rl" ] && [ -n "$model_display" ] && [ "$(echo "${cost_usd:-0} == 0" | bc 2>/dev/null)" = "1" ]; then
+elif [ -z "$has_rl" ] && [ -n "$model_display" ] && awk -v cost="${cost_usd:-0}" 'BEGIN {exit !(cost == 0)}' 2>/dev/null; then
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Session:-${C_RESET}"
 fi
@@ -125,7 +125,7 @@ if [ -n "$d7_pct" ]; then
     c=$(color_for_pct "$d7_pct")
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
-elif [ -z "$has_rl" ] && [ -n "$model_display" ] && [ "$(echo "${cost_usd:-0} == 0" | bc 2>/dev/null)" = "1" ]; then
+elif [ -z "$has_rl" ] && [ -n "$model_display" ] && awk -v cost="${cost_usd:-0}" 'BEGIN {exit !(cost == 0)}' 2>/dev/null; then
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Week:-${C_RESET}"
 fi
@@ -158,14 +158,14 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
         fi
     fi
 
-    if [ "$(echo "$cost_usd < $last_session_usd" | bc)" = "1" ]; then
-        cumulative_usd=$(echo "$cumulative_usd + $last_session_usd" | bc)
+    if awk -v cur="$cost_usd" -v last="$last_session_usd" 'BEGIN {exit !(cur < last)}' 2>/dev/null; then
+        cumulative_usd=$(awk -v cum="$cumulative_usd" -v last="$last_session_usd" 'BEGIN {print cum + last}')
     fi
     printf '%s:%s:%s' "$cur_date" "$cumulative_usd" "$cost_usd" > "${BUDGET_CACHE}.tmp" && mv "${BUDGET_CACHE}.tmp" "$BUDGET_CACHE"
 
-    total_usd=$(echo "$cumulative_usd + $cost_usd" | bc)
-    total_jpy=$(echo "scale=6; $total_usd * $jpy_rate" | bc | awk '{printf "%d", $1 + 0.5}')
-    session_jpy=$(echo "scale=6; $cost_usd * $jpy_rate" | bc | awk '{printf "%d", $1 + 0.5}')
+    total_usd=$(awk -v cum="$cumulative_usd" -v cur="$cost_usd" 'BEGIN {print cum + cur}')
+    total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
+    session_jpy=$(awk -v cur="$cost_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", cur * rate + 0.5}')
 
     if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
         budget_jpy=500
@@ -182,7 +182,7 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
         warn=""
         [ $pct -ge 100 ] && warn="!!"
         cost_fmt=$(printf "%.2f" "$total_usd")
-        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}\$${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
+        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
     fi
 fi
 
