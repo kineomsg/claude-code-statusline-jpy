@@ -55,10 +55,19 @@ if (Test-Path $gaugeCache) {
     $parts = (Get-Content $gaugeCache -Raw).Trim().Split('|')
     if ($parts.Count -eq 7) {
         $gCwd, $gCtx, $gH5, $gH5r, $gD7, $gD7r, $gTs = $parts
-        if ($gCwd -eq $cwd -and $cwd -and (($now - [long]$gTs) -lt $gaugeTtl)) {
-            if (-not $ctx_pct -and $gCtx) { $ctx_pct = [int]$gCtx }
-            if (-not $h5_pct -and $gH5)   { $h5_pct = [int]$gH5; $gH5r = [long]$gH5r; $h5_reset = [long]$gH5r }
-            if (-not $d7_pct -and $gD7)   { $d7_pct = [int]$gD7; $gD7r = [long]$gD7r; $d7_reset = [long]$gD7r }
+        if ($gCwd -eq $cwd -and $cwd -and -not [string]::IsNullOrWhiteSpace($gTs)) {
+            $tsVal = 0L
+            if ([long]::TryParse($gTs, [ref]$tsVal) -and ($now - $tsVal) -lt $gaugeTtl) {
+                if (-not $ctx_pct -and -not [string]::IsNullOrWhiteSpace($gCtx)) { $ctx_pct = [int]$gCtx }
+                if (-not $h5_pct -and -not [string]::IsNullOrWhiteSpace($gH5)) {
+                    $h5_pct = [int]$gH5
+                    $h5_reset = if (-not [string]::IsNullOrWhiteSpace($gH5r)) { [long]$gH5r } else { 0L }
+                }
+                if (-not $d7_pct -and -not [string]::IsNullOrWhiteSpace($gD7)) {
+                    $d7_pct = [int]$gD7
+                    $d7_reset = if (-not [string]::IsNullOrWhiteSpace($gD7r)) { [long]$gD7r } else { 0L }
+                }
+            }
         }
     }
 }
@@ -114,7 +123,7 @@ if ($null -ne $ctx_pct) {
 }
 
 # JPY rate cache (weekly refresh via ECB/frankfurter.app)
-$jpyCachePath = "$HOME\.claude\jpy_rate.cache"
+$jpyCachePath = Join-Path $HOME '.claude/jpy_rate.cache'
 $jpyRate = $null
 if (Test-Path $jpyCachePath) {
     $content = Get-Content $jpyCachePath -Raw
@@ -127,20 +136,35 @@ if (Test-Path $jpyCachePath) {
     }
 }
 if ($null -eq $jpyRate) {
-    try {
-        $resp    = Invoke-RestMethod -Uri "https://api.frankfurter.app/latest?from=USD&to=JPY"
-        $jpyRate = $resp.rates.JPY
-        if ($null -ne $jpyRate) {
-            "${now}:${jpyRate}" | Set-Content "${jpyCachePath}.tmp"
-            Move-Item -Force "${jpyCachePath}.tmp" $jpyCachePath
-        }
-    } catch {}
+    $jpyLockPath = Join-Path $HOME '.claude/jpy_rate.lock'
+    $lockAge = 999999
+    if (Test-Path $jpyLockPath) {
+        try {
+            $lockAge = ([DateTimeOffset]::UtcNow - (Get-Item $jpyLockPath).LastWriteTimeUtc).TotalSeconds
+        } catch {}
+    }
+    if ($lockAge -gt 30) {
+        try { New-Item -Path $jpyLockPath -ItemType File -Force > $null } catch {}
+        Start-Job -ScriptBlock {
+            param($cachePath, $lockPath, $nowSec)
+            try {
+                $resp = Invoke-RestMethod -Uri "https://api.frankfurter.app/latest?from=USD&to=JPY" -TimeoutSec 5
+                $rate = $resp.rates.JPY
+                if ($null -ne $rate) {
+                    "${nowSec}:${rate}" | Set-Content "${cachePath}.tmp"
+                    Move-Item -Force "${cachePath}.tmp" $cachePath
+                }
+            } catch {} finally {
+                Remove-Item -Force $lockPath -ErrorAction SilentlyContinue
+            }
+        } -ArgumentList $jpyCachePath, $jpyLockPath, $now > $null
+    }
 }
 
 # Daily cost tracking (¥500/day — ¥10,000/month ÷ 20 business days)
 $costUsd = $data.cost.total_cost_usd
 if ($null -ne $costUsd -and $null -ne $jpyRate) {
-    $budgetCachePath = "$HOME\.claude\cost_budget.cache"
+    $budgetCachePath = Join-Path $HOME '.claude/cost_budget.cache'
     $curDate         = (Get-Date).ToString("yyyy-MM-dd")
     $cumulativeUsd   = 0.0
     $lastSessionUsd  = 0.0
