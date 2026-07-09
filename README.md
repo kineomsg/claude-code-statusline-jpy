@@ -19,32 +19,37 @@ Subscription user (Max — rate limits not reported by API):
 Sonnet4.6(high) Session:- Week:- Ctx:▰▰▱▱▱40%
 ```
 
-API key user with spending limit:
+API key user with spending limit (2nd session of the day):
 
 ```
-Sonnet4.6(high) Ctx:▰▰▱▱▱40% Cost:▰▱▱▱▱$0.45(¥67/¥500) Acct:▰▱▱▱▱15%
+Sonnet4.6(high) Ctx:▰▰▱▱▱40% Cost:▰▰▱▱▱$1.27(¥67 Today:¥200/¥500)
 ```
 
 API key user, over daily budget:
 
 ```
-!!Opus4.8(high) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰$3.20(¥510/¥500) Acct:▰▰▰▱▱55%
+!Opus4.8(high) Ctx:▰▰▰▱▱60% Cost:!!▰▰▰▰▰$3.20(¥200 Today:¥510/¥500)
+```
+
+Fable5 user:
+
+```
+!!Fable5 Ctx:▰▰▱▱▱40%
 ```
 
 ## Features
 
 | Field | Description |
 |---|---|
-| `Sonnet4.6(high)` / `!!Opus4.8` | Model name and effort level; Opus is prefixed with `!!` |
+| `Sonnet4.6(high)` / `!Opus4.8` / `!!Fable5` | Model name and effort level; Opus is prefixed with amber `!`, Fable5 with red `!!` |
 | `Session:XX%(HH:MM)` / `Session:-` | 5-hour rate limit usage and reset time; shows `-` on Max when the API doesn't report limits |
 | `Week:XX%(XdXh)` / `Week:-` | 7-day rate limit usage and time until reset; shows `-` on Max when the API doesn't report limits |
 | `Ctx:▰▰▱▱▱XX%` | Context window usage (5-segment bar) |
-| `Cost:▰▱▱▱▱$X.XX(¥XXX/¥500)` | Daily cost in USD + JPY with budget bar |
-| `Acct:▰▱▱▱▱XX%` | Account spending vs. monthly limit (API key users with a spending limit set) |
+| `Cost:▰▱▱▱▱$X.XX(¥XXX Today:¥XXX/¥500)` | Daily total in USD, current session and daily total in JPY with budget bar |
 
 **Cost display behavior:**
-- Accumulates cost across sessions within the same day
-- Resets automatically at midnight each day
+- First value (`¥XXX`) is the **current session** cost; `Today:¥XXX/¥500` is the **daily cumulative** total across all sessions
+- Daily total resets automatically at midnight
 - Exchange rate fetched weekly from ECB (European Central Bank) via [frankfurter.app](https://www.frankfurter.app/)
 - If the exchange rate hasn't been fetched yet, the Cost field is not shown until the background refresh completes
 - **Not shown on subscription plans (Pro/Max)** — `cost.total_cost_usd` is always 0 for subscribers
@@ -135,7 +140,6 @@ Add to `%USERPROFILE%\.claude\settings.json`:
 ├── statusline.sh          # Linux / macOS / WSL
 ├── statusline.ps1         # Native Windows
 ├── jpy_rate.cache         # Exchange rate cache (auto-generated)
-├── oauth_usage.cache      # Account usage cache (auto-generated, subscription only)
 └── cost_budget.cache      # Daily cost cache (auto-generated)
 ```
 
@@ -203,7 +207,6 @@ If you get `command not found` for `jq` or `bc`, installing the missing tool wil
 - **API key and Azure AI Foundry** show the Cost field reflecting actual token spend
 - JPY conversion uses a weekly-cached exchange rate from ECB and will not reflect real-time fluctuations. If the rate hasn't been fetched yet, the Cost field is simply not shown
 - When using Azure AI Foundry, costs are estimated based on Anthropic's public pricing and may differ from your actual Azure bill
-- The `Acct:` field shows API account spending against your monthly limit — only visible when a spending limit is configured in the [Anthropic Console](https://console.anthropic.com/) and the OAuth credentials are available in `~/.claude/.credentials.json`
 
 ## License
 

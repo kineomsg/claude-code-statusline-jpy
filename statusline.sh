@@ -6,8 +6,8 @@ now=$(date +%s)
 C_RESET=$'\e[0m'
 C_PURPLE=$'\e[38;2;167;139;250m'   # model name
 C_GREEN=$'\e[38;2;130;180;100m'    # healthy (<60%)
-C_AMBER=$'\e[38;2;229;192;123m'    # warning (>=60%)
-C_RED=$'\e[38;2;224;108;117m'      # critical (>=80%) / Opus !!
+C_AMBER=$'\e[38;2;229;192;123m'    # warning (>=60%) / Opus !
+C_RED=$'\e[38;2;224;108;117m'      # critical (>=80%) / Fable !!
 C_DIM=$'\e[38;2;92;99;112m'        # labels
 
 color_for_pct() {
@@ -30,8 +30,24 @@ eval "$(echo "$input" | jq -r '
     "d7_reset="      + (if .rate_limits.seven_day.resets_at != null then (.rate_limits.seven_day.resets_at | tostring) else "" end | @sh) + "\n" +
     "ctx_pct="       + (if .context_window.used_percentage != null then (.context_window.used_percentage | floor | tostring) else "" end | @sh) + "\n" +
     "cost_usd="      + (if .cost.total_cost_usd != null then (.cost.total_cost_usd | tostring) else "" end | @sh) + "\n" +
+    "cwd="           + (.cwd // "" | @sh) + "\n" +
     "has_rl="        + (if .rate_limits != null then "1" else "" end | @sh)
 ' 2>/dev/null)"
+
+# === Gauge fallback cache (Claude Code omits context_window/rate_limits briefly after a mid-session model switch) ===
+GAUGE_CACHE="$HOME/.claude/statusline_gauges.cache"
+GAUGE_TTL=20
+if [ -f "$GAUGE_CACHE" ]; then
+    IFS='|' read -r g_cwd g_ctx g_h5 g_h5r g_d7 g_d7r g_ts < "$GAUGE_CACHE"
+    if [ "$g_cwd" = "$cwd" ] && [ -n "$cwd" ] && [[ "$g_ts" =~ ^[0-9]+$ ]] && [ $(( now - g_ts )) -lt $GAUGE_TTL ]; then
+        [ -z "$ctx_pct" ] && [ -n "$g_ctx" ] && ctx_pct="$g_ctx"
+        [ -z "$h5_pct" ] && [ -n "$g_h5" ] && h5_pct="$g_h5" && h5_reset="$g_h5r"
+        [ -z "$d7_pct" ] && [ -n "$g_d7" ] && d7_pct="$g_d7" && d7_reset="$g_d7r"
+    fi
+fi
+if [ -n "$cwd" ] && { [ -n "$ctx_pct" ] || [ -n "$h5_pct" ] || [ -n "$d7_pct" ]; }; then
+    echo "${cwd}|${ctx_pct}|${h5_pct}|${h5_reset:-0}|${d7_pct}|${d7_reset:-0}|${now}" > "$GAUGE_CACHE"
+fi
 
 fmt_reset_hm() {
     [ -z "$1" ] && echo "soon" && return
@@ -75,42 +91,6 @@ if [ -z "$jpy_rate" ]; then
     fi
 fi
 
-# === Anthropic OAuth account usage (5-minute cache, background fetch) ===
-OAUTH_CACHE="$HOME/.claude/oauth_usage.cache"
-OAUTH_LOCK="$HOME/.claude/oauth_usage.lock"
-oauth_pct=""
-if [ -f "$OAUTH_CACHE" ]; then
-    oauth_age=$(( now - $(stat_mtime "$OAUTH_CACHE") ))
-    if [ "$oauth_age" -lt 300 ]; then
-        oauth_pct=$(cut -f3 "$OAUTH_CACHE" 2>/dev/null)
-    fi
-fi
-if [ -z "$oauth_pct" ]; then
-    lock_age=$(( now - $(stat_mtime "$OAUTH_LOCK") ))
-    if [ "$lock_age" -gt 60 ]; then
-        touch "$OAUTH_LOCK" 2>/dev/null
-        (
-            token=$(jq -r '.claudeAiOauth.accessToken // empty' "$HOME/.claude/.credentials.json" 2>/dev/null)
-            if [ -n "$token" ]; then
-                json=$(curl -sf --max-time 10 "https://api.anthropic.com/api/oauth/usage" \
-                    -H "Authorization: Bearer $token" \
-                    -H "anthropic-beta: oauth-2025-04-20" \
-                    -H "Content-Type: application/json" 2>/dev/null)
-                result=$(printf '%s' "$json" | jq -r '
-                    if .extra_usage.used_credits then
-                        [.extra_usage.used_credits, .extra_usage.monthly_limit, (.extra_usage.utilization * 100 | floor)] | @tsv
-                    elif .spend.used.amount_minor then
-                        [.spend.used.amount_minor, .spend.limit.amount_minor, (.spend.percent * 100 | floor)] | @tsv
-                    else empty end' 2>/dev/null)
-                if [ -n "$result" ]; then
-                    printf '%s' "$result" > "${OAUTH_CACHE}.tmp" && mv "${OAUTH_CACHE}.tmp" "$OAUTH_CACHE"
-                fi
-            fi
-            rm -f "$OAUTH_LOCK"
-        ) >/dev/null 2>&1 &
-    fi
-fi
-
 # === Build output ===
 out=""
 
@@ -120,6 +100,8 @@ if [ -n "$model_display" ]; then
     model_str="${model_short}"
     [ -n "$effort" ] && model_str="${model_str}(${effort})"
     if [[ "$model_id" == *"opus"* ]]; then
+        out="${C_AMBER}!${model_str}${C_RESET}"
+    elif [[ "$model_id" == *"fable"* ]]; then
         out="${C_RED}!!${model_str}${C_RESET}"
     else
         out="${C_PURPLE}${model_str}${C_RESET}"
@@ -132,7 +114,7 @@ if [ -n "$h5_pct" ]; then
     c=$(color_for_pct "$h5_pct")
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Session:${C_RESET}${c}${h5_pct}%${C_DIM}(${rst})${C_RESET}"
-elif [ -z "$has_rl" ] && [ -n "$model_display" ] && [ "$(echo "${cost_usd:-0} == 0" | bc 2>/dev/null)" = "1" ]; then
+elif [ -z "$has_rl" ] && [ -n "$model_display" ] && awk -v cost="${cost_usd:-0}" 'BEGIN {exit !(cost == 0)}' 2>/dev/null; then
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Session:-${C_RESET}"
 fi
@@ -143,7 +125,7 @@ if [ -n "$d7_pct" ]; then
     c=$(color_for_pct "$d7_pct")
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
-elif [ -z "$has_rl" ] && [ -n "$model_display" ] && [ "$(echo "${cost_usd:-0} == 0" | bc 2>/dev/null)" = "1" ]; then
+elif [ -z "$has_rl" ] && [ -n "$model_display" ] && awk -v cost="${cost_usd:-0}" 'BEGIN {exit !(cost == 0)}' 2>/dev/null; then
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Week:-${C_RESET}"
 fi
@@ -176,13 +158,14 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
         fi
     fi
 
-    if [ "$(echo "$cost_usd < $last_session_usd" | bc)" = "1" ]; then
-        cumulative_usd=$(echo "$cumulative_usd + $last_session_usd" | bc)
+    if awk -v cur="$cost_usd" -v last="$last_session_usd" 'BEGIN {exit !(cur < last)}' 2>/dev/null; then
+        cumulative_usd=$(awk -v cum="$cumulative_usd" -v last="$last_session_usd" 'BEGIN {print cum + last}')
     fi
     printf '%s:%s:%s' "$cur_date" "$cumulative_usd" "$cost_usd" > "${BUDGET_CACHE}.tmp" && mv "${BUDGET_CACHE}.tmp" "$BUDGET_CACHE"
 
-    total_usd=$(echo "$cumulative_usd + $cost_usd" | bc)
-    total_jpy=$(echo "scale=6; $total_usd * $jpy_rate" | bc | awk '{printf "%d", $1 + 0.5}')
+    total_usd=$(awk -v cum="$cumulative_usd" -v cur="$cost_usd" 'BEGIN {print cum + cur}')
+    total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
+    session_jpy=$(awk -v cur="$cost_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", cur * rate + 0.5}')
 
     if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
         budget_jpy=500
@@ -195,26 +178,12 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
         for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
         for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
         bar="${filled_bar}${C_DIM}${empty_bar}"
-        cost_fmt=$(printf "%.2f" "$total_usd")
         [ -n "$out" ] && out="$out "
         warn=""
         [ $pct -ge 100 ] && warn="!!"
-        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}\$${cost_fmt}${C_RESET}(¥${total_jpy}/¥500)"
+        cost_fmt=$(printf "%.2f" "$total_usd")
+        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
     fi
-fi
-
-# Account monthly usage (Anthropic OAuth API, shown only when cache is available)
-if [ -n "$oauth_pct" ] && [ "$oauth_pct" -gt 0 ] 2>/dev/null; then
-    [ "$oauth_pct" -gt 100 ] && oauth_pct=100
-    filled=$(( oauth_pct / 20 ))
-    [ $filled -gt 5 ] && filled=5
-    empty=$(( 5 - filled ))
-    c=$(color_for_pct "$oauth_pct")
-    filled_bar="" empty_bar=""
-    for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
-    for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
-    [ -n "$out" ] && out="$out "
-    out="${out}${C_DIM}Acct:${C_RESET}${c}${filled_bar}${C_DIM}${empty_bar}${C_RESET}${c}${oauth_pct}%${C_RESET}"
 fi
 
 printf "%s" "$out"

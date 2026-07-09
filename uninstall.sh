@@ -15,7 +15,7 @@ for f in statusline.sh statusline.ps1; do
 done
 
 # Remove cache files
-for f in jpy_rate.cache cost_budget.cache; do
+for f in jpy_rate.cache jpy_rate.lock cost_budget.cache statusline_gauges.cache; do
     if [ -f "$DEST/$f" ]; then
         rm "$DEST/$f"
         echo "  Removed $DEST/$f"

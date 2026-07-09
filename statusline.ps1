@@ -9,8 +9,8 @@ $ESC      = [char]0x1b
 $C_RESET  = "$ESC[0m"
 $C_PURPLE = "$ESC[38;2;167;139;250m"   # model name
 $C_GREEN  = "$ESC[38;2;130;180;100m"   # healthy (<60%)
-$C_AMBER  = "$ESC[38;2;229;192;123m"   # warning (>=60%)
-$C_RED    = "$ESC[38;2;224;108;117m"   # critical (>=80%) / Opus !!
+$C_AMBER  = "$ESC[38;2;229;192;123m"   # warning (>=60%) / Opus !
+$C_RED    = "$ESC[38;2;224;108;117m"   # critical (>=80%) / Fable !!
 $C_DIM    = "$ESC[38;2;92;99;112m"     # labels
 
 function Get-ColorForPct($pct) {
@@ -46,15 +46,49 @@ $h5_reset = $data.rate_limits.five_hour.resets_at
 $d7_pct   = if ($null -ne $data.rate_limits.seven_day.used_percentage)  { [int]$data.rate_limits.seven_day.used_percentage }  else { $null }
 $d7_reset = $data.rate_limits.seven_day.resets_at
 $ctx_pct  = if ($null -ne $data.context_window.used_percentage) { [int]$data.context_window.used_percentage } else { $null }
-$hasRl    = ($null -ne $data.rate_limits)
-$costUsd  = $data.cost.total_cost_usd
+$cwd      = $data.cwd
+
+# === Gauge fallback cache (Claude Code omits context_window/rate_limits briefly after a mid-session model switch) ===
+$gaugeCache = Join-Path $HOME '.claude/statusline_gauges.cache'
+$gaugeTtl = 20
+if (Test-Path $gaugeCache) {
+    $parts = (Get-Content $gaugeCache -Raw).Trim().Split('|')
+    if ($parts.Count -eq 7) {
+        $gCwd, $gCtx, $gH5, $gH5r, $gD7, $gD7r, $gTs = $parts
+        if ($gCwd -eq $cwd -and $cwd -and -not [string]::IsNullOrWhiteSpace($gTs)) {
+            $tsVal = 0L
+            if ([long]::TryParse($gTs, [ref]$tsVal) -and ($now - $tsVal) -lt $gaugeTtl) {
+                if (-not $ctx_pct -and -not [string]::IsNullOrWhiteSpace($gCtx)) { $ctx_pct = [int]$gCtx }
+                if (-not $h5_pct -and -not [string]::IsNullOrWhiteSpace($gH5)) {
+                    $h5_pct = [int]$gH5
+                    $h5_reset = if (-not [string]::IsNullOrWhiteSpace($gH5r)) { [long]$gH5r } else { 0L }
+                }
+                if (-not $d7_pct -and -not [string]::IsNullOrWhiteSpace($gD7)) {
+                    $d7_pct = [int]$gD7
+                    $d7_reset = if (-not [string]::IsNullOrWhiteSpace($gD7r)) { [long]$gD7r } else { 0L }
+                }
+            }
+        }
+    }
+}
+if ($cwd -and ($ctx_pct -or $h5_pct -or $d7_pct)) {
+    "$cwd|$ctx_pct|$h5_pct|$h5_reset|$d7_pct|$d7_reset|$now" | Set-Content $gaugeCache
+}
+
+# Max subscribers: rate_limits is absent from the API response entirely (upstream bug).
+# Show "-" placeholders instead of silently dropping the fields.
+$hasRl        = $null -ne $data.rate_limits
+$costUsdForRl = if ($null -ne $data.cost.total_cost_usd) { $data.cost.total_cost_usd } else { 0 }
+$isMaxNoRl    = (-not $hasRl) -and $modelDisplay -and ($costUsdForRl -eq 0)
 
 # Model prefix
 $out = ""
 if ($modelDisplay) {
     $modelShort = $modelDisplay -replace ' ', ''
     $modelStr   = if ($effort) { "${modelShort}(${effort})" } else { $modelShort }
-    if ($modelId -match 'opus') {
+    if ($modelId -cmatch 'opus') {
+        $out = "${C_AMBER}!${modelStr}${C_RESET}"
+    } elseif ($modelId -cmatch 'fable') {
         $out = "${C_RED}!!${modelStr}${C_RESET}"
     } else {
         $out = "${C_PURPLE}${modelStr}${C_RESET}"
@@ -66,7 +100,7 @@ if ($null -ne $h5_pct) {
     $c   = Get-ColorForPct $h5_pct
     if ($out) { $out += " " }
     $out += "${C_DIM}Session:${C_RESET}${c}${h5_pct}%${C_DIM}(${rst})${C_RESET}"
-} elseif (!$hasRl -and $modelDisplay -and ($null -eq $costUsd -or $costUsd -eq 0.0)) {
+} elseif ($isMaxNoRl) {
     if ($out) { $out += " " }
     $out += "${C_DIM}Session:-${C_RESET}"
 }
@@ -75,7 +109,7 @@ if ($null -ne $d7_pct) {
     $c   = Get-ColorForPct $d7_pct
     if ($out) { $out += " " }
     $out += "${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
-} elseif (!$hasRl -and $modelDisplay -and ($null -eq $costUsd -or $costUsd -eq 0.0)) {
+} elseif ($isMaxNoRl) {
     if ($out) { $out += " " }
     $out += "${C_DIM}Week:-${C_RESET}"
 }
@@ -89,7 +123,7 @@ if ($null -ne $ctx_pct) {
 }
 
 # JPY rate cache (weekly refresh via ECB/frankfurter.app)
-$jpyCachePath = "$HOME\.claude\jpy_rate.cache"
+$jpyCachePath = Join-Path $HOME '.claude/jpy_rate.cache'
 $jpyRate = $null
 if (Test-Path $jpyCachePath) {
     $content = Get-Content $jpyCachePath -Raw
@@ -102,61 +136,34 @@ if (Test-Path $jpyCachePath) {
     }
 }
 if ($null -eq $jpyRate) {
-    try {
-        $resp    = Invoke-RestMethod -Uri "https://api.frankfurter.app/latest?from=USD&to=JPY"
-        $jpyRate = $resp.rates.JPY
-        if ($null -ne $jpyRate) {
-            "${now}:${jpyRate}" | Set-Content "${jpyCachePath}.tmp"
-            Move-Item -Force "${jpyCachePath}.tmp" $jpyCachePath
-        }
-    } catch {}
-}
-
-# Anthropic OAuth account usage (5-minute cache)
-$oauthCachePath = "$HOME\.claude\oauth_usage.cache"
-$oauthPct = $null
-if (Test-Path $oauthCachePath) {
-    $oauthAge = ((Get-Date) - (Get-Item $oauthCachePath).LastWriteTime).TotalSeconds
-    if ($oauthAge -lt 300) {
-        $oauthContent = Get-Content $oauthCachePath -Raw
-        if ($null -ne $oauthContent) {
-            $oauthParts = $oauthContent.Trim() -split "`t", 3
-            if ($oauthParts.Count -ge 3) { $oauthPct = $oauthParts[2] -as [int] }
-        }
+    $jpyLockPath = Join-Path $HOME '.claude/jpy_rate.lock'
+    $lockAge = 999999
+    if (Test-Path $jpyLockPath) {
+        try {
+            $lockAge = ([DateTimeOffset]::UtcNow - (Get-Item $jpyLockPath).LastWriteTimeUtc).TotalSeconds
+        } catch {}
     }
-}
-if ($null -eq $oauthPct) {
-    try {
-        $credPath = "$HOME\.claude\.credentials.json"
-        if (Test-Path $credPath) {
-            $cred  = Get-Content $credPath -Raw | ConvertFrom-Json
-            $token = $cred.claudeAiOauth.accessToken
-            if ($token) {
-                $headers = @{
-                    "Authorization"  = "Bearer $token"
-                    "anthropic-beta" = "oauth-2025-04-20"
-                    "Content-Type"   = "application/json"
+    if ($lockAge -gt 30) {
+        try { New-Item -Path $jpyLockPath -ItemType File -Force > $null } catch {}
+        Start-Job -ScriptBlock {
+            param($cachePath, $lockPath, $nowSec)
+            try {
+                $resp = Invoke-RestMethod -Uri "https://api.frankfurter.app/latest?from=USD&to=JPY" -TimeoutSec 5
+                $rate = $resp.rates.JPY
+                if ($null -ne $rate) {
+                    "${nowSec}:${rate}" | Set-Content "${cachePath}.tmp"
+                    Move-Item -Force "${cachePath}.tmp" $cachePath
                 }
-                $resp = Invoke-RestMethod -Uri "https://api.anthropic.com/api/oauth/usage" -Headers $headers
-                if ($resp.extra_usage.used_credits) {
-                    $pctVal = [int]($resp.extra_usage.utilization * 100)
-                    "$($resp.extra_usage.used_credits)`t$($resp.extra_usage.monthly_limit)`t${pctVal}" | Set-Content "${oauthCachePath}.tmp"
-                    Move-Item -Force "${oauthCachePath}.tmp" $oauthCachePath
-                    $oauthPct = $pctVal
-                } elseif ($resp.spend.used.amount_minor) {
-                    $pctVal = [int]($resp.spend.percent * 100)
-                    "$($resp.spend.used.amount_minor)`t$($resp.spend.limit.amount_minor)`t${pctVal}" | Set-Content "${oauthCachePath}.tmp"
-                    Move-Item -Force "${oauthCachePath}.tmp" $oauthCachePath
-                    $oauthPct = $pctVal
-                }
+            } catch {} finally {
+                Remove-Item -Force $lockPath -ErrorAction SilentlyContinue
             }
-        }
-    } catch {}
+        } -ArgumentList $jpyCachePath, $jpyLockPath, $now > $null
+    }
 }
 
 # Daily cost tracking (¥500/day — ¥10,000/month ÷ 20 business days)
 if ($null -ne $costUsd -and $null -ne $jpyRate) {
-    $budgetCachePath = "$HOME\.claude\cost_budget.cache"
+    $budgetCachePath = Join-Path $HOME '.claude/cost_budget.cache'
     $curDate         = (Get-Date).ToString("yyyy-MM-dd")
     $cumulativeUsd   = 0.0
     $lastSessionUsd  = 0.0
@@ -176,8 +183,9 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
     "${curDate}:${cumulativeUsd}:${costUsd}" | Set-Content "${budgetCachePath}.tmp"
     Move-Item -Force "${budgetCachePath}.tmp" $budgetCachePath
 
-    $totalUsd = $cumulativeUsd + $costUsd
-    $totalJpy = [int]($totalUsd * $jpyRate)
+    $totalUsd   = $cumulativeUsd + $costUsd
+    $totalJpy   = [int]($totalUsd * $jpyRate)
+    $sessionJpy = [int]($costUsd  * $jpyRate)
 
     if ($totalJpy -gt 0) {
         $budgetJpy  = 500
@@ -189,19 +197,8 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
         $warn       = if ($pct -ge 100) { "!!" } else { "" }
         $costFmt    = "{0:F2}" -f $totalUsd
         if ($out) { $out += " " }
-        $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${costFmt}${C_RESET}(¥${totalJpy}/¥500)"
+        $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpy}${C_DIM}/¥500)${C_RESET}"
     }
-}
-
-# Account monthly usage (OAuth API, shown only when cache is available)
-if ($null -ne $oauthPct -and $oauthPct -gt 0) {
-    $oauthPctCapped = [Math]::Min($oauthPct, 100)
-    $filled    = [Math]::Max(0, [Math]::Min([Math]::Floor($oauthPctCapped / 20), 5))
-    $filledBar = "▰" * $filled
-    $emptyBar  = "▱" * (5 - $filled)
-    $c         = Get-ColorForPct $oauthPctCapped
-    if ($out) { $out += " " }
-    $out += "${C_DIM}Acct:${C_RESET}${c}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}${oauthPctCapped}%${C_RESET}"
 }
 
 [Console]::Write($out)
