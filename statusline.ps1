@@ -281,15 +281,22 @@ if ($null -ne $costUsd) {
         $sessionJpy = [int]($costUsd  * $jpyRate)
 
         if ($totalJpy -gt 0) {
-            $budgetJpy  = 500
-            $pct        = [Math]::Min([int]($totalJpy * 100 / $budgetJpy), 100)
-            $filled     = [Math]::Floor($pct / 20)
-            $c          = Get-ColorForPct $pct
-            $filledBar  = "▰" * $filled
-            $emptyBar   = "▱" * (5 - $filled)
-            $warn       = if ($pct -ge 100) { "!!" } else { "" }
-            if ($out) { $out += " " }
-            $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${estPrefix}${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpy}${C_DIM}/¥500)${C_RESET}"
+            $totalJpyFmt   = "{0:N0}" -f $totalJpy
+            $sessionJpyFmt = "{0:N0}" -f $sessionJpy
+            if ($hasRl) {
+                if ($out) { $out += " " }
+                $out += "${C_DIM}Cost:${C_RESET}${C_GREEN}~`$${costFmt}${C_RESET}${C_DIM}(${C_RESET}${C_GREEN}~¥${totalJpyFmt}${C_DIM})${C_RESET}"
+            } else {
+                $budgetJpy  = 500
+                $pct        = [Math]::Min([int]($totalJpy * 100 / $budgetJpy), 100)
+                $filled     = [Math]::Floor($pct / 20)
+                $c          = Get-ColorForPct $pct
+                $filledBar  = "▰" * $filled
+                $emptyBar   = "▱" * (5 - $filled)
+                $warn       = if ($pct -ge 100) { "!!" } else { "" }
+                if ($out) { $out += " " }
+                $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${estPrefix}${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpyFmt}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpyFmt}${C_DIM}/¥500)${C_RESET}"
+            }
         }
     } elseif ($totalUsd -gt 0) {
         # JPY rate not yet cached (offline / blocked) — show plain $ amount, no bar/budget

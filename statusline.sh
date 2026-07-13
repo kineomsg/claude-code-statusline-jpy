@@ -18,6 +18,7 @@ color_for_pct() {
 }
 
 stat_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
+add_commas() { printf '%d' "$1" | rev | sed 's/\([0-9]\{3\}\)/\1,/g' | sed 's/,$//' | rev; }
 
 compute_cost_estimate() {
     jq -R 'fromjson? // empty' "$1" 2>/dev/null | jq -s '
@@ -254,20 +255,25 @@ if [ -n "$cost_usd" ]; then
         session_jpy=$(awk -v cur="$cost_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", cur * rate + 0.5}')
 
         if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
-            budget_jpy=500
-            pct=$(( total_jpy * 100 / budget_jpy ))
-            [ $pct -gt 100 ] && pct=100
-            filled=$(( pct / 20 ))
-            empty=$(( 5 - filled ))
-            c=$(color_for_pct "$pct")
-            filled_bar="" empty_bar=""
-            for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
-            for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
-            bar="${filled_bar}${C_DIM}${empty_bar}"
-            [ -n "$out" ] && out="$out "
-            warn=""
-            [ $pct -ge 100 ] && warn="!!"
-            out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${est_prefix}${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
+            if [ -n "$has_rl" ]; then
+                [ -n "$out" ] && out="$out "
+                out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}~\$${cost_fmt}${C_DIM}(${C_RESET}${C_GREEN}~¥$(add_commas "$total_jpy")${C_DIM})${C_RESET}"
+            else
+                budget_jpy=500
+                pct=$(( total_jpy * 100 / budget_jpy ))
+                [ $pct -gt 100 ] && pct=100
+                filled=$(( pct / 20 ))
+                empty=$(( 5 - filled ))
+                c=$(color_for_pct "$pct")
+                filled_bar="" empty_bar=""
+                for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
+                for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
+                bar="${filled_bar}${C_DIM}${empty_bar}"
+                [ -n "$out" ] && out="$out "
+                warn=""
+                [ $pct -ge 100 ] && warn="!!"
+                out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${est_prefix}${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥$(add_commas "$session_jpy")${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥$(add_commas "$total_jpy")${C_DIM}/¥500)${C_RESET}"
+            fi
         fi
     elif awk -v tot="$total_usd" 'BEGIN {exit !(tot > 0)}' 2>/dev/null; then
         # JPY rate not yet cached (offline / blocked) — show plain $ amount, no bar/budget
