@@ -78,9 +78,19 @@ if ($cwd -and ($ctx_pct -or $h5_pct -or $d7_pct)) {
 # Max subscribers: rate_limits is absent from the API response entirely (upstream bug).
 # Show "-" placeholders instead of silently dropping the fields.
 $hasRl        = $null -ne $data.rate_limits
-$costUsdForRl = if ($null -ne $data.cost.total_cost_usd) { $data.cost.total_cost_usd } else { 0 }
-$costUsd = $data.cost.total_cost_usd
-$isMaxNoRl    = (-not $hasRl) -and $modelDisplay -and ($costUsdForRl -eq 0)
+$costUsd      = $data.cost.total_cost_usd
+
+# Determine subscriber status:
+# cost.total_cost_usd is no longer always 0 for subscription plans (Pro/Max).
+# We classify as subscriber if hasRl is true OR if hasRl is false but none of the 4 billed env vars are present.
+$isSubscriber = $hasRl -or (
+    [string]::IsNullOrEmpty($env:ANTHROPIC_API_KEY) -and
+    [string]::IsNullOrEmpty($env:CLAUDE_CODE_USE_BEDROCK) -and
+    [string]::IsNullOrEmpty($env:CLAUDE_CODE_USE_VERTEX) -and
+    [string]::IsNullOrEmpty($env:CLAUDE_CODE_USE_FOUNDRY)
+)
+
+$isMaxNoRl    = (-not $hasRl) -and $modelDisplay -and $isSubscriber
 
 # Model prefix
 $out = ""
@@ -274,7 +284,7 @@ if ($null -ne $costUsd) {
 
     $totalUsd  = $cumulativeUsd + $costUsd
     $costFmt   = "{0:F2}" -f $totalUsd
-    $estPrefix = if ($costIsEstimate -or $hasRl) { "~" } else { "" }
+    $estPrefix = if ($costIsEstimate -or $isSubscriber) { "~" } else { "" }
 
     if ($null -ne $jpyRate) {
         $totalJpy   = [int]($totalUsd * $jpyRate)
@@ -283,7 +293,7 @@ if ($null -ne $costUsd) {
         if ($totalJpy -gt 0) {
             $totalJpyFmt   = "{0:N0}" -f $totalJpy
             $sessionJpyFmt = "{0:N0}" -f $sessionJpy
-            if ($hasRl) {
+            if ($isSubscriber) {
                 if ($out) { $out += " " }
                 $out += "${C_DIM}Cost:${C_RESET}${C_GREEN}~`$${costFmt}${C_RESET}${C_DIM}(${C_RESET}${C_GREEN}~¥${totalJpyFmt}${C_DIM})${C_RESET}"
             } else {

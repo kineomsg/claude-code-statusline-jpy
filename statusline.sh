@@ -67,6 +67,15 @@ eval "$(echo "$input" | jq -r '
     "has_rl="        + (if .rate_limits != null then "1" else "" end | @sh)
 ' 2>/dev/null)"
 
+# === Determine subscriber status ===
+# cost.total_cost_usd is no longer always 0 for subscription plans (Pro/Max).
+# We classify as subscriber if has_rl is set (Pro/Team) OR if has_rl is empty but none of the 4 billed env vars are present (Max/OAuth plan).
+is_subscriber=""
+if [ -n "$has_rl" ] || { [ -z "$ANTHROPIC_API_KEY" ] && [ -z "$CLAUDE_CODE_USE_BEDROCK" ] && [ -z "$CLAUDE_CODE_USE_VERTEX" ] && [ -z "$CLAUDE_CODE_USE_FOUNDRY" ]; }; then
+    is_subscriber="1"
+fi
+
+
 # === Gauge fallback cache (Claude Code omits context_window/rate_limits briefly after a mid-session model switch) ===
 GAUGE_CACHE="$HOME/.claude/statusline_gauges.cache"
 GAUGE_TTL=20
@@ -147,7 +156,7 @@ if [ -n "$h5_pct" ]; then
     c=$(color_for_pct "$h5_pct")
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Session:${C_RESET}${c}${h5_pct}%${C_DIM}(${rst})${C_RESET}"
-elif [ -z "$has_rl" ] && [ -n "$model_display" ] && awk -v cost="${cost_usd:-0}" 'BEGIN {exit !(cost == 0)}' 2>/dev/null; then
+elif [ -z "$has_rl" ] && [ -n "$model_display" ] && [ -n "$is_subscriber" ]; then
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Session:-${C_RESET}"
 fi
@@ -158,7 +167,7 @@ if [ -n "$d7_pct" ]; then
     c=$(color_for_pct "$d7_pct")
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
-elif [ -z "$has_rl" ] && [ -n "$model_display" ] && awk -v cost="${cost_usd:-0}" 'BEGIN {exit !(cost == 0)}' 2>/dev/null; then
+elif [ -z "$has_rl" ] && [ -n "$model_display" ] && [ -n "$is_subscriber" ]; then
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Week:-${C_RESET}"
 fi
@@ -248,14 +257,14 @@ if [ -n "$cost_usd" ]; then
 
     total_usd=$(awk -v cum="$cumulative_usd" -v cur="$cost_usd" 'BEGIN {print cum + cur}')
     cost_fmt=$(printf "%.2f" "$total_usd")
-    est_prefix=""; { [ -n "$cost_is_estimate" ] || [ -n "$has_rl" ]; } && est_prefix="~"
+    est_prefix=""; { [ -n "$cost_is_estimate" ] || [ -n "$is_subscriber" ]; } && est_prefix="~"
 
     if [ -n "$jpy_rate" ]; then
         total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
         session_jpy=$(awk -v cur="$cost_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", cur * rate + 0.5}')
 
         if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
-            if [ -n "$has_rl" ]; then
+            if [ -n "$is_subscriber" ]; then
                 [ -n "$out" ] && out="$out "
                 out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}~\$${cost_fmt}${C_DIM}(${C_RESET}${C_GREEN}~¥$(add_commas "$total_jpy")${C_DIM})${C_RESET}"
             else
