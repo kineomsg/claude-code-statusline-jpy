@@ -204,9 +204,9 @@ If you get `command not found` for `jq` or `bc`, installing the missing tool wil
 
 - **Subscription plans (Pro/Max)** do not show the Cost field — `cost.total_cost_usd` is always 0 for subscribers
 - **Claude.ai Max** subscribers see `Session:-` and `Week:-` — the Anthropic API currently does not report rate limit data for Max accounts. This is a [known bug in Claude Code](https://github.com/anthropics/claude-code/issues/63659) affecting all platforms (not Windows-only despite the issue title). The script displays `-` as a placeholder until Anthropic fixes the upstream issue
-- **API key and Azure AI Foundry** show the Cost field reflecting actual token spend
+- **API key** shows the Cost field reflecting actual billed spend from Anthropic
 - JPY conversion uses a weekly-cached exchange rate from ECB and will not reflect real-time fluctuations. If the rate hasn't been fetched yet, the Cost field is simply not shown
-- When using Azure AI Foundry, costs are estimated based on Anthropic's public pricing and may differ from your actual Azure bill
+- **Azure AI Foundry, Amazon Bedrock, and Google Vertex AI** show an estimated cost (prefixed with `~`) calculated from token usage in the session transcript and Anthropic's published per-model pricing — this may differ from your actual provider bill, since Claude Code does not report exact billing for these auth paths
 
 ## License
 
