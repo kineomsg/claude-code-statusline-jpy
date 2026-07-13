@@ -51,7 +51,7 @@ Fable5 user:
 - First value (`¥XXX`) is the **current session** cost; `Today:¥XXX/¥500` is the **daily cumulative** total across all sessions
 - Daily total resets automatically at midnight
 - Exchange rate fetched weekly from ECB (European Central Bank) via [frankfurter.app](https://www.frankfurter.app/)
-- If the exchange rate hasn't been fetched yet, the Cost field is not shown until the background refresh completes
+- If the exchange rate hasn't been fetched yet (or the host can't reach frankfurter.app), the Cost field still shows the plain USD amount (e.g. `Cost:$1.27`) without the JPY conversion/budget bar, until the background refresh completes
 - **Not shown on subscription plans (Pro/Max)** — `cost.total_cost_usd` is always 0 for subscribers
 - Shows `!!` prefix when the ¥500 daily budget is exceeded
 
@@ -205,8 +205,9 @@ If you get `command not found` for `jq` or `bc`, installing the missing tool wil
 - **Subscription plans (Pro/Max)** do not show the Cost field — `cost.total_cost_usd` is always 0 for subscribers
 - **Claude.ai Max** subscribers see `Session:-` and `Week:-` — the Anthropic API currently does not report rate limit data for Max accounts. This is a [known bug in Claude Code](https://github.com/anthropics/claude-code/issues/63659) affecting all platforms (not Windows-only despite the issue title). The script displays `-` as a placeholder until Anthropic fixes the upstream issue
 - **API key** shows the Cost field reflecting actual billed spend from Anthropic
-- JPY conversion uses a weekly-cached exchange rate from ECB and will not reflect real-time fluctuations. If the rate hasn't been fetched yet, the Cost field is simply not shown
+- JPY conversion uses a weekly-cached exchange rate from ECB and will not reflect real-time fluctuations. If the rate hasn't been fetched yet (or is unreachable from your network), the Cost field falls back to a plain USD amount with no JPY conversion/budget bar — it does not disappear entirely
 - **Azure AI Foundry, Amazon Bedrock, and Google Vertex AI** show an estimated cost (prefixed with `~`) calculated from token usage in the session transcript and Anthropic's published per-model pricing — this may differ from your actual provider bill, since Claude Code does not report exact billing for these auth paths
+- The estimated cost relies on Claude Code passing `transcript_path` in the statusLine hook JSON. If a particular Claude Code version/build omits it, the script falls back to locating the most recently modified transcript under `~/.claude/projects/<cwd with "/" replaced by "-">/` instead
 
 ## License
 
