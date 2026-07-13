@@ -10,13 +10,13 @@ A statusline for [Claude Code](https://claude.ai/code) that shows model, rate li
 Subscription user (Pro):
 
 ```
-Sonnet4.6(high) Session:45%(14:30) Week:20%(2d3h) Ctx:▰▰▱▱▱40%
+Sonnet4.6(high) Session:45%(14:30) Week:20%(2d3h) Ctx:▰▰▱▱▱40% Cost:~$14.24(~¥2,306)
 ```
 
 Subscription user (Max — rate limits not reported by API):
 
 ```
-Sonnet4.6(high) Session:- Week:- Ctx:▰▰▱▱▱40%
+Sonnet4.6(high) Session:- Week:- Ctx:▰▰▱▱▱40% Cost:~$14.24(~¥2,306)
 ```
 
 API key user with spending limit (2nd session of the day):
@@ -50,27 +50,27 @@ Fable5 user:
 **Cost display behavior:**
 - First value (`¥XXX`) is the **current session** cost; `Today:¥XXX/¥500` is the **daily cumulative** total across all sessions
 - Daily total resets automatically at midnight
-- Exchange rate fetched weekly from ECB (European Central Bank) via [frankfurter.app](https://www.frankfurter.app/)
-- If the exchange rate hasn't been fetched yet (or the host can't reach frankfurter.app), the Cost field still shows the plain USD amount (e.g. `Cost:$1.27`) without the JPY conversion/budget bar, until the background refresh completes
-- **Not shown on subscription plans (Pro/Max)** — `cost.total_cost_usd` is always 0 for subscribers
-- Shows `!!` prefix when the ¥500 daily budget is exceeded
+- Exchange rate fetched weekly from ECB (European Central Bank) via [frankfurter.dev](https://www.frankfurter.dev/)
+- If the exchange rate hasn't been fetched yet (or the host can't reach frankfurter.dev), the Cost field still shows the plain USD amount (e.g. `Cost:$1.27`) without the JPY conversion/budget bar, until the background refresh completes
+- **Subscription plans (Pro/Max)** display a plain `Cost:~$X.XX(~¥X,XXX)` format (no budget bar/warning, where `~` signals a client-side estimate rather than actual billing)
+- **API-key and other billed users** show the full colored budget bar, JPY session/daily total conversion, and `!!` warning prefix when the ¥500 daily budget is exceeded
 
 ## Platform Support
 
 | Platform | Script | Requirements |
 |---|---|---|
-| Linux | `statusline.sh` | `jq`, `bc`, `curl` |
-| macOS | `statusline.sh` | `jq`, `bc`, `curl` (via Homebrew) |
-| WSL | `statusline.sh` | `jq`, `bc`, `curl` |
-| Git Bash (Windows) | `statusline.sh` | `jq`, `curl`, `bc` |
+| Linux | `statusline.sh` | `jq`, `curl` |
+| macOS | `statusline.sh` | `jq`, `curl` (via Homebrew) |
+| WSL | `statusline.sh` | `jq`, `curl` |
+| Git Bash (Windows) | `statusline.sh` | `jq`, `curl` |
 | Native Windows | `statusline.ps1` | PowerShell 5.1+ (no extra installs needed) |
 
 <details>
 <summary>Installing dependencies</summary>
 
-**Ubuntu / Debian:** `sudo apt install jq bc curl`  
-**macOS:** `brew install jq bc curl`  
-**Arch Linux:** `sudo pacman -S jq bc curl`  
+**Ubuntu / Debian:** `sudo apt install jq curl`  
+**macOS:** `brew install jq curl`  
+**Arch Linux:** `sudo pacman -S jq curl`  
 **Windows:** PowerShell version needs no extras.
 
 </details>
@@ -175,19 +175,19 @@ $budgetJpy = 500  # change this value
 
 ### Statusline doesn't appear in Cursor (or VS Code integrated terminal)
 
-GUI apps on macOS launch with a minimal PATH that often excludes Homebrew's directories (`/opt/homebrew/bin`, `/usr/local/bin`). If `jq`, `bc`, or `curl` can't be found, the script produces no output and the statusline row disappears entirely.
+GUI apps on macOS launch with a minimal PATH that often excludes Homebrew's directories (`/opt/homebrew/bin`, `/usr/local/bin`). If `jq` or `curl` can't be found, the script produces no output and the statusline row disappears entirely.
 
 The script already prepends these paths automatically. If it still doesn't appear, verify the tools are installed:
 
 ```bash
-which jq bc curl
+which jq curl
 ```
 
 If any are missing, install them:
 
 ```bash
-brew install jq bc curl   # macOS
-sudo apt install jq bc curl  # Ubuntu / Debian
+brew install jq curl   # macOS
+sudo apt install jq curl  # Ubuntu / Debian
 ```
 
 ### Statusline appears in a normal terminal but not in Cursor
@@ -198,11 +198,11 @@ Run the script manually in Cursor's terminal to see any errors:
 echo '{}' | ~/.claude/statusline.sh
 ```
 
-If you get `command not found` for `jq` or `bc`, installing the missing tool will fix it.
+If you get `command not found` for `jq`, installing the missing tool will fix it.
 
 ## Notes
 
-- **Subscription plans (Pro/Max)** do not show the Cost field — `cost.total_cost_usd` is always 0 for subscribers
+- **Subscription plans (Pro/Max)** display a plain estimate with no budget bar (prefixed with `~`, e.g. `Cost:~$14.24(~¥2,306)`)
 - **Claude.ai Max** subscribers see `Session:-` and `Week:-` — the Anthropic API currently does not report rate limit data for Max accounts. This is a [known bug in Claude Code](https://github.com/anthropics/claude-code/issues/63659) affecting all platforms (not Windows-only despite the issue title). The script displays `-` as a placeholder until Anthropic fixes the upstream issue
 - **API key** shows the Cost field reflecting actual billed spend from Anthropic
 - JPY conversion uses a weekly-cached exchange rate from ECB and will not reflect real-time fluctuations. If the rate hasn't been fetched yet (or is unreachable from your network), the Cost field falls back to a plain USD amount with no JPY conversion/budget bar — it does not disappear entirely

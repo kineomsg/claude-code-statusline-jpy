@@ -248,7 +248,7 @@ if [ -n "$cost_usd" ]; then
 
     total_usd=$(awk -v cum="$cumulative_usd" -v cur="$cost_usd" 'BEGIN {print cum + cur}')
     cost_fmt=$(printf "%.2f" "$total_usd")
-    est_prefix=""; [ -n "$cost_is_estimate" ] && est_prefix="~"
+    est_prefix=""; { [ -n "$cost_is_estimate" ] || [ -n "$has_rl" ]; } && est_prefix="~"
 
     if [ -n "$jpy_rate" ]; then
         total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
@@ -272,13 +272,13 @@ if [ -n "$cost_usd" ]; then
                 [ -n "$out" ] && out="$out "
                 warn=""
                 [ $pct -ge 100 ] && warn="!!"
-                out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${est_prefix}${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥$(add_commas "$session_jpy")${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥$(add_commas "$total_jpy")${C_DIM}/¥500)${C_RESET}"
+                out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}${est_prefix}\$${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥$(add_commas "$session_jpy")${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥$(add_commas "$total_jpy")${C_DIM}/¥500)${C_RESET}"
             fi
         fi
     elif awk -v tot="$total_usd" 'BEGIN {exit !(tot > 0)}' 2>/dev/null; then
         # JPY rate not yet cached (offline / blocked) — show plain $ amount, no bar/budget
         [ -n "$out" ] && out="$out "
-        out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}\$${est_prefix}${cost_fmt}${C_RESET}"
+        out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}${est_prefix}\$${cost_fmt}${C_RESET}"
     fi
 fi
 

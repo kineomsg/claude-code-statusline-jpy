@@ -123,7 +123,7 @@ if ($null -ne $ctx_pct) {
     $out += "${C_DIM}Ctx:${C_RESET}${c}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}${ctx_pct}%${C_RESET}"
 }
 
-# JPY rate cache (weekly refresh via ECB/frankfurter.app)
+# JPY rate cache (weekly refresh via ECB/frankfurter.dev)
 $jpyCachePath = Join-Path $HOME '.claude/jpy_rate.cache'
 $jpyRate = $null
 if (Test-Path $jpyCachePath) {
@@ -274,7 +274,7 @@ if ($null -ne $costUsd) {
 
     $totalUsd  = $cumulativeUsd + $costUsd
     $costFmt   = "{0:F2}" -f $totalUsd
-    $estPrefix = if ($costIsEstimate) { "~" } else { "" }
+    $estPrefix = if ($costIsEstimate -or $hasRl) { "~" } else { "" }
 
     if ($null -ne $jpyRate) {
         $totalJpy   = [int]($totalUsd * $jpyRate)
@@ -295,13 +295,13 @@ if ($null -ne $costUsd) {
                 $emptyBar   = "▱" * (5 - $filled)
                 $warn       = if ($pct -ge 100) { "!!" } else { "" }
                 if ($out) { $out += " " }
-                $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${estPrefix}${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpyFmt}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpyFmt}${C_DIM}/¥500)${C_RESET}"
+                $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}${estPrefix}`$${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpyFmt}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpyFmt}${C_DIM}/¥500)${C_RESET}"
             }
         }
     } elseif ($totalUsd -gt 0) {
         # JPY rate not yet cached (offline / blocked) — show plain $ amount, no bar/budget
         if ($out) { $out += " " }
-        $out += "${C_DIM}Cost:${C_RESET}${C_GREEN}`$${estPrefix}${costFmt}${C_RESET}"
+        $out += "${C_DIM}Cost:${C_RESET}${C_GREEN}${estPrefix}`$${costFmt}${C_RESET}"
     }
 }
 
