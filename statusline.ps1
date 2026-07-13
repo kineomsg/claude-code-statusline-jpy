@@ -79,6 +79,7 @@ if ($cwd -and ($ctx_pct -or $h5_pct -or $d7_pct)) {
 # Show "-" placeholders instead of silently dropping the fields.
 $hasRl        = $null -ne $data.rate_limits
 $costUsdForRl = if ($null -ne $data.cost.total_cost_usd) { $data.cost.total_cost_usd } else { 0 }
+$costUsd = $data.cost.total_cost_usd
 $isMaxNoRl    = (-not $hasRl) -and $modelDisplay -and ($costUsdForRl -eq 0)
 
 # Model prefix
@@ -161,6 +162,79 @@ if ($null -eq $jpyRate) {
     }
 }
 
+function Get-CostEstimate($path) {
+    $priceTable = @{
+        'claude-opus-4-8'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
+        'claude-opus-4-7'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
+        'claude-opus-4-6'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
+        'claude-opus-4-5'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
+        'claude-opus-4-1'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
+        'claude-opus-4-0'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
+        'claude-sonnet-5'   = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
+        'claude-sonnet-4-6' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
+        'claude-sonnet-4-5' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
+        'claude-sonnet-4-0' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
+        'claude-haiku-4-5'  = @{ In = 1.00;  Out = 5.00;  CWrite = 1.25;  CRead = 0.10 }
+        'claude-fable-5'    = @{ In = 10.00; Out = 50.00; CWrite = 12.50; CRead = 1.00 }
+        'claude-mythos-5'   = @{ In = 10.00; Out = 50.00; CWrite = 12.50; CRead = 1.00 }
+    }
+    $defaultKey = 'claude-sonnet-5'
+    $total = 0.0
+    $lines = $null
+    try { $lines = Get-Content -LiteralPath $path -ErrorAction Stop } catch { return $null }
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $entry = $null
+        try { $entry = $line | ConvertFrom-Json -ErrorAction Stop } catch { continue }
+        if ($null -eq $entry -or $entry.type -ne 'assistant') { continue }
+        $usage = $entry.message.usage
+        if ($null -eq $usage) { continue }
+        $model = $entry.message.model
+        if ([string]::IsNullOrWhiteSpace($model)) { $model = $defaultKey }
+        $model = $model -replace '^anthropic\.', ''
+        $model = $model -replace '@.*$', ''
+        $model = $model -replace '-\d{8}$', ''
+        $rate = $priceTable[$model]
+        if ($null -eq $rate) { $rate = $priceTable[$defaultKey] }
+        $inTok  = if ($null -ne $usage.input_tokens) { [double]$usage.input_tokens } else { 0.0 }
+        $outTok = if ($null -ne $usage.output_tokens) { [double]$usage.output_tokens } else { 0.0 }
+        $cwTok  = if ($null -ne $usage.cache_creation_input_tokens) { [double]$usage.cache_creation_input_tokens } else { 0.0 }
+        $crTok  = if ($null -ne $usage.cache_read_input_tokens) { [double]$usage.cache_read_input_tokens } else { 0.0 }
+        $total += ($inTok * $rate.In + $outTok * $rate.Out + $cwTok * $rate.CWrite + $crTok * $rate.CRead) / 1000000
+    }
+    return $total
+}
+
+# === Fallback cost estimate (Claude Code omits cost.total_cost_usd for Azure/Bedrock/Vertex-routed sessions) ===
+$costIsEstimate = $false
+$transcriptPath = $data.transcript_path
+if ($null -eq $costUsd -and -not [string]::IsNullOrWhiteSpace($transcriptPath) -and (Test-Path -LiteralPath $transcriptPath)) {
+    $estCachePath = Join-Path $HOME '.claude/cost_estimate.cache'
+    $tMtime = [long]((Get-Item -LiteralPath $transcriptPath).LastWriteTimeUtc - [datetime]'1970-01-01').TotalSeconds
+
+    $cachedPath = $null; $cachedMtime = $null; $cachedVal = $null
+    if (Test-Path $estCachePath) {
+        $c = Get-Content $estCachePath -Raw
+        if ($null -ne $c) {
+            $parts = $c.Trim() -split '\|', 3
+            if ($parts.Count -eq 3) { $cachedPath, $cachedMtime, $cachedVal = $parts }
+        }
+    }
+
+    if ($cachedPath -eq $transcriptPath -and $cachedMtime -eq "$tMtime" -and -not [string]::IsNullOrWhiteSpace($cachedVal)) {
+        $estVal = $cachedVal -as [double]
+    } else {
+        $estVal = Get-CostEstimate $transcriptPath
+        if ($null -ne $estVal) {
+            "$transcriptPath|$tMtime|$estVal" | Set-Content "${estCachePath}.tmp"
+            Move-Item -Force "${estCachePath}.tmp" $estCachePath
+        }
+    }
+    if ($null -eq $estVal) { $estVal = 0 }
+    $costUsd = $estVal
+    $costIsEstimate = $true
+}
+
 # Daily cost tracking (¥500/day — ¥10,000/month ÷ 20 business days)
 if ($null -ne $costUsd -and $null -ne $jpyRate) {
     $budgetCachePath = Join-Path $HOME '.claude/cost_budget.cache'
@@ -196,8 +270,9 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
         $emptyBar   = "▱" * (5 - $filled)
         $warn       = if ($pct -ge 100) { "!!" } else { "" }
         $costFmt    = "{0:F2}" -f $totalUsd
+        $estPrefix = if ($costIsEstimate) { "~" } else { "" }
         if ($out) { $out += " " }
-        $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpy}${C_DIM}/¥500)${C_RESET}"
+        $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${estPrefix}${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpy}${C_DIM}/¥500)${C_RESET}"
     }
 }
 
