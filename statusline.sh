@@ -31,6 +31,7 @@ eval "$(echo "$input" | jq -r '
     "ctx_pct="       + (if .context_window.used_percentage != null then (.context_window.used_percentage | floor | tostring) else "" end | @sh) + "\n" +
     "cost_usd="      + (if .cost.total_cost_usd != null then (.cost.total_cost_usd | tostring) else "" end | @sh) + "\n" +
     "cwd="           + (.cwd // "" | @sh) + "\n" +
+    "transcript_path=" + (.transcript_path // "" | @sh) + "\n" +
     "has_rl="        + (if .rate_limits != null then "1" else "" end | @sh)
 ' 2>/dev/null)"
 
@@ -143,6 +144,45 @@ if [ -n "$ctx_pct" ]; then
     out="${out}${C_DIM}Ctx:${C_RESET}${c}${filled_bar}${C_DIM}${empty_bar}${C_RESET}${c}${ctx_pct}%${C_RESET}"
 fi
 
+# === Fallback cost estimate (Claude Code omits cost.total_cost_usd for Azure/Bedrock/Vertex-routed sessions) ===
+cost_is_estimate=""
+if [ -z "$cost_usd" ] && [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
+    EST_CACHE="$HOME/.claude/cost_estimate.cache"
+    t_mtime=$(stat_mtime "$transcript_path")
+    est_val=""
+    if [ -f "$EST_CACHE" ]; then
+        cached_path=$(cut -d'|' -f1 "$EST_CACHE")
+        cached_mtime=$(cut -d'|' -f2 "$EST_CACHE")
+        cached_val=$(cut -d'|' -f3 "$EST_CACHE")
+        if [ "$cached_path" = "$transcript_path" ] && [ "$cached_mtime" = "$t_mtime" ]; then
+            est_val="$cached_val"
+        fi
+    fi
+    if [ -z "$est_val" ]; then
+        est_val=$(jq -s '
+            {
+              "claude-opus-4-8":   {in:5.00,  out:25.00, cwrite:6.25,  cread:0.50},
+              "claude-sonnet-5":   {in:3.00,  out:15.00, cwrite:3.75,  cread:0.30},
+              "claude-haiku-4-5":  {in:1.00,  out:5.00,  cwrite:1.25,  cread:0.10},
+              "claude-fable-5":    {in:10.00, out:50.00, cwrite:12.50, cread:1.00}
+            } as $p |
+            ( [ .[] | select(.type == "assistant") | .message | select(.usage) |
+                { model: (.model // "claude-sonnet-5"), u: .usage } ] ) as $msgs |
+            (reduce $msgs[] as $m (0;
+                . + (($p[$m.model] // $p["claude-sonnet-5"]) as $r |
+                    (($m.u.input_tokens // 0) * $r.in +
+                     ($m.u.output_tokens // 0) * $r.out +
+                     ($m.u.cache_creation_input_tokens // 0) * $r.cwrite +
+                     ($m.u.cache_read_input_tokens // 0) * $r.cread) / 1000000)
+            ))
+        ' "$transcript_path" 2>/dev/null)
+        [ -z "$est_val" ] && est_val="0"
+        printf '%s|%s|%s' "$transcript_path" "$t_mtime" "$est_val" > "${EST_CACHE}.tmp" && mv "${EST_CACHE}.tmp" "$EST_CACHE"
+    fi
+    cost_usd="$est_val"
+    cost_is_estimate=1
+fi
+
 # Daily cost
 if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
     BUDGET_CACHE="$HOME/.claude/cost_budget.cache"
@@ -182,7 +222,8 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
         warn=""
         [ $pct -ge 100 ] && warn="!!"
         cost_fmt=$(printf "%.2f" "$total_usd")
-        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
+        est_prefix=""; [ -n "$cost_is_estimate" ] && est_prefix="~"
+        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${est_prefix}${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
     fi
 fi
 
