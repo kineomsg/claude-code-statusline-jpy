@@ -114,7 +114,7 @@ if [ -z "$jpy_rate" ]; then
     if [ "$lock_age" -gt 30 ]; then
         touch "$JPY_LOCK" 2>/dev/null
         (
-            fetched=$(curl -sf --max-time 5 "https://api.frankfurter.app/latest?from=USD&to=JPY" | jq -r '.rates.JPY // empty')
+            fetched=$(curl -sf --max-time 5 "https://api.frankfurter.dev/v1/latest?from=USD&to=JPY" | jq -r '.rates.JPY // empty')
             if [ -n "$fetched" ]; then
                 printf '%s:%s' "$now" "$fetched" > "${JPY_CACHE}.tmp" && mv "${JPY_CACHE}.tmp" "$JPY_CACHE"
             fi

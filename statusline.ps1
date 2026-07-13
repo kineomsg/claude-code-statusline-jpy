@@ -149,7 +149,7 @@ if ($null -eq $jpyRate) {
         Start-Job -ScriptBlock {
             param($cachePath, $lockPath, $nowSec)
             try {
-                $resp = Invoke-RestMethod -Uri "https://api.frankfurter.app/latest?from=USD&to=JPY" -TimeoutSec 5
+                $resp = Invoke-RestMethod -Uri "https://api.frankfurter.dev/v1/latest?from=USD&to=JPY" -TimeoutSec 5
                 $rate = $resp.rates.JPY
                 if ($null -ne $rate) {
                     "${nowSec}:${rate}" | Set-Content "${cachePath}.tmp"
