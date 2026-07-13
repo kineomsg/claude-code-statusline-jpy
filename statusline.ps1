@@ -236,7 +236,9 @@ if ($null -eq $costUsd -and -not [string]::IsNullOrWhiteSpace($transcriptPath) -
 }
 
 # Daily cost tracking (¥500/day — ¥10,000/month ÷ 20 business days)
-if ($null -ne $costUsd -and $null -ne $jpyRate) {
+# NOTE: jpyRate is best-effort (fetched over the network); the $ cost must still
+# display even when the JPY conversion is unavailable (offline, blocked host, etc.)
+if ($null -ne $costUsd) {
     $budgetCachePath = Join-Path $HOME '.claude/cost_budget.cache'
     $curDate         = (Get-Date).ToString("yyyy-MM-dd")
     $cumulativeUsd   = 0.0
@@ -257,22 +259,29 @@ if ($null -ne $costUsd -and $null -ne $jpyRate) {
     "${curDate}:${cumulativeUsd}:${costUsd}" | Set-Content "${budgetCachePath}.tmp"
     Move-Item -Force "${budgetCachePath}.tmp" $budgetCachePath
 
-    $totalUsd   = $cumulativeUsd + $costUsd
-    $totalJpy   = [int]($totalUsd * $jpyRate)
-    $sessionJpy = [int]($costUsd  * $jpyRate)
+    $totalUsd  = $cumulativeUsd + $costUsd
+    $costFmt   = "{0:F2}" -f $totalUsd
+    $estPrefix = if ($costIsEstimate) { "~" } else { "" }
 
-    if ($totalJpy -gt 0) {
-        $budgetJpy  = 500
-        $pct        = [Math]::Min([int]($totalJpy * 100 / $budgetJpy), 100)
-        $filled     = [Math]::Floor($pct / 20)
-        $c          = Get-ColorForPct $pct
-        $filledBar  = "▰" * $filled
-        $emptyBar   = "▱" * (5 - $filled)
-        $warn       = if ($pct -ge 100) { "!!" } else { "" }
-        $costFmt    = "{0:F2}" -f $totalUsd
-        $estPrefix = if ($costIsEstimate) { "~" } else { "" }
+    if ($null -ne $jpyRate) {
+        $totalJpy   = [int]($totalUsd * $jpyRate)
+        $sessionJpy = [int]($costUsd  * $jpyRate)
+
+        if ($totalJpy -gt 0) {
+            $budgetJpy  = 500
+            $pct        = [Math]::Min([int]($totalJpy * 100 / $budgetJpy), 100)
+            $filled     = [Math]::Floor($pct / 20)
+            $c          = Get-ColorForPct $pct
+            $filledBar  = "▰" * $filled
+            $emptyBar   = "▱" * (5 - $filled)
+            $warn       = if ($pct -ge 100) { "!!" } else { "" }
+            if ($out) { $out += " " }
+            $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${estPrefix}${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpy}${C_DIM}/¥500)${C_RESET}"
+        }
+    } elseif ($totalUsd -gt 0) {
+        # JPY rate not yet cached (offline / blocked) — show plain $ amount, no bar/budget
         if ($out) { $out += " " }
-        $out += "${C_DIM}Cost:${C_RESET}${c}${warn}${filledBar}${C_DIM}${emptyBar}${C_RESET}${c}`$${estPrefix}${costFmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${sessionJpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${totalJpy}${C_DIM}/¥500)${C_RESET}"
+        $out += "${C_DIM}Cost:${C_RESET}${C_GREEN}`$${estPrefix}${costFmt}${C_RESET}"
     }
 }
 

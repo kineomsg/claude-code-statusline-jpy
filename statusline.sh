@@ -213,7 +213,9 @@ if [ -z "$cost_usd" ] && [ -n "$transcript_path" ] && [ -f "$transcript_path" ];
 fi
 
 # Daily cost
-if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
+# NOTE: jpy_rate is best-effort (fetched over the network); the $ cost must still
+# display even when the JPY conversion is unavailable (offline, blocked host, etc.)
+if [ -n "$cost_usd" ]; then
     BUDGET_CACHE="$HOME/.claude/cost_budget.cache"
     cur_date=$(date +%Y-%m-%d)
     cumulative_usd="0"
@@ -233,26 +235,33 @@ if [ -n "$cost_usd" ] && [ -n "$jpy_rate" ]; then
     printf '%s:%s:%s' "$cur_date" "$cumulative_usd" "$cost_usd" > "${BUDGET_CACHE}.tmp" && mv "${BUDGET_CACHE}.tmp" "$BUDGET_CACHE"
 
     total_usd=$(awk -v cum="$cumulative_usd" -v cur="$cost_usd" 'BEGIN {print cum + cur}')
-    total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
-    session_jpy=$(awk -v cur="$cost_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", cur * rate + 0.5}')
+    cost_fmt=$(printf "%.2f" "$total_usd")
+    est_prefix=""; [ -n "$cost_is_estimate" ] && est_prefix="~"
 
-    if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
-        budget_jpy=500
-        pct=$(( total_jpy * 100 / budget_jpy ))
-        [ $pct -gt 100 ] && pct=100
-        filled=$(( pct / 20 ))
-        empty=$(( 5 - filled ))
-        c=$(color_for_pct "$pct")
-        filled_bar="" empty_bar=""
-        for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
-        for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
-        bar="${filled_bar}${C_DIM}${empty_bar}"
+    if [ -n "$jpy_rate" ]; then
+        total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
+        session_jpy=$(awk -v cur="$cost_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", cur * rate + 0.5}')
+
+        if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
+            budget_jpy=500
+            pct=$(( total_jpy * 100 / budget_jpy ))
+            [ $pct -gt 100 ] && pct=100
+            filled=$(( pct / 20 ))
+            empty=$(( 5 - filled ))
+            c=$(color_for_pct "$pct")
+            filled_bar="" empty_bar=""
+            for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
+            for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
+            bar="${filled_bar}${C_DIM}${empty_bar}"
+            [ -n "$out" ] && out="$out "
+            warn=""
+            [ $pct -ge 100 ] && warn="!!"
+            out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${est_prefix}${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
+        fi
+    elif awk -v tot="$total_usd" 'BEGIN {exit !(tot > 0)}' 2>/dev/null; then
+        # JPY rate not yet cached (offline / blocked) — show plain $ amount, no bar/budget
         [ -n "$out" ] && out="$out "
-        warn=""
-        [ $pct -ge 100 ] && warn="!!"
-        cost_fmt=$(printf "%.2f" "$total_usd")
-        est_prefix=""; [ -n "$cost_is_estimate" ] && est_prefix="~"
-        out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}\$${est_prefix}${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥${session_jpy}${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥${total_jpy}${C_DIM}/¥500)${C_RESET}"
+        out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}\$${est_prefix}${cost_fmt}${C_RESET}"
     fi
 fi
 
