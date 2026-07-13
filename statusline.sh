@@ -19,6 +19,37 @@ color_for_pct() {
 
 stat_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 
+compute_cost_estimate() {
+    jq -R 'fromjson? // empty' "$1" 2>/dev/null | jq -s '
+        {
+          "claude-opus-4-8": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
+          "claude-opus-4-7": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
+          "claude-opus-4-6": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
+          "claude-opus-4-5": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
+          "claude-opus-4-1": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
+          "claude-opus-4-0": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
+          "claude-sonnet-5": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
+          "claude-sonnet-4-6": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
+          "claude-sonnet-4-5": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
+          "claude-sonnet-4-0": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
+          "claude-haiku-4-5": {in:1.00, out:5.00, cwrite:1.25, cread:0.10},
+          "claude-fable-5": {in:10.00, out:50.00, cwrite:12.50, cread:1.00},
+          "claude-mythos-5": {in:10.00, out:50.00, cwrite:12.50, cread:1.00}
+        } as $p |
+        def norm_model:
+            sub("^anthropic\\."; "") | sub("@.*$"; "") | sub("-[0-9]{8}$"; "");
+        ( [ .[]? | select(.type == "assistant") | .message // {} | select(.usage) |
+            { model: ((.model // "claude-sonnet-5") | norm_model), u: .usage } ] ) as $msgs |
+        (reduce $msgs[] as $m (0;
+            . + (($p[$m.model] // $p["claude-sonnet-5"]) as $r |
+                (($m.u.input_tokens // 0) * $r.in +
+                 ($m.u.output_tokens // 0) * $r.out +
+                 ($m.u.cache_creation_input_tokens // 0) * $r.cwrite +
+                 ($m.u.cache_read_input_tokens // 0) * $r.cread) / 1000000)
+        ))
+    ' 2>/dev/null
+}
+
 # === Single jq call for all JSON fields ===
 eval "$(echo "$input" | jq -r '
     "model_id="      + (.model.id // "" | @sh) + "\n" +
@@ -148,37 +179,35 @@ fi
 cost_is_estimate=""
 if [ -z "$cost_usd" ] && [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
     EST_CACHE="$HOME/.claude/cost_estimate.cache"
+    EST_LOCK="$HOME/.claude/cost_estimate.lock"
     t_mtime=$(stat_mtime "$transcript_path")
-    est_val=""
+    cached_path="" cached_mtime="" cached_val=""
     if [ -f "$EST_CACHE" ]; then
         cached_path=$(cut -d'|' -f1 "$EST_CACHE")
         cached_mtime=$(cut -d'|' -f2 "$EST_CACHE")
         cached_val=$(cut -d'|' -f3 "$EST_CACHE")
-        if [ "$cached_path" = "$transcript_path" ] && [ "$cached_mtime" = "$t_mtime" ]; then
-            est_val="$cached_val"
+    fi
+    est_val=""
+    if [ "$cached_path" = "$transcript_path" ] && [ "$cached_mtime" = "$t_mtime" ] && [ -n "$cached_val" ]; then
+        est_val="$cached_val"
+    else
+        [ "$cached_path" = "$transcript_path" ] && [ -n "$cached_val" ] && est_val="$cached_val"
+        lock_age=$(( now - $(stat_mtime "$EST_LOCK") ))
+        if [ "$lock_age" -gt 30 ]; then
+            touch "$EST_LOCK" 2>/dev/null
+            (
+                computed=$(compute_cost_estimate "$transcript_path")
+                if [ -n "$computed" ]; then
+                    printf '%s|%s|%s' "$transcript_path" "$t_mtime" "$computed" > "${EST_CACHE}.tmp" && mv "${EST_CACHE}.tmp" "$EST_CACHE"
+                fi
+                rm -f "$EST_LOCK"
+            ) >/dev/null 2>&1 &
+        fi
+        if [ -z "$est_val" ]; then
+            est_val=$(compute_cost_estimate "$transcript_path")
         fi
     fi
-    if [ -z "$est_val" ]; then
-        est_val=$(jq -s '
-            {
-              "claude-opus-4-8":   {in:5.00,  out:25.00, cwrite:6.25,  cread:0.50},
-              "claude-sonnet-5":   {in:3.00,  out:15.00, cwrite:3.75,  cread:0.30},
-              "claude-haiku-4-5":  {in:1.00,  out:5.00,  cwrite:1.25,  cread:0.10},
-              "claude-fable-5":    {in:10.00, out:50.00, cwrite:12.50, cread:1.00}
-            } as $p |
-            ( [ .[] | select(.type == "assistant") | .message | select(.usage) |
-                { model: (.model // "claude-sonnet-5"), u: .usage } ] ) as $msgs |
-            (reduce $msgs[] as $m (0;
-                . + (($p[$m.model] // $p["claude-sonnet-5"]) as $r |
-                    (($m.u.input_tokens // 0) * $r.in +
-                     ($m.u.output_tokens // 0) * $r.out +
-                     ($m.u.cache_creation_input_tokens // 0) * $r.cwrite +
-                     ($m.u.cache_read_input_tokens // 0) * $r.cread) / 1000000)
-            ))
-        ' "$transcript_path" 2>/dev/null)
-        [ -z "$est_val" ] && est_val="0"
-        printf '%s|%s|%s' "$transcript_path" "$t_mtime" "$est_val" > "${EST_CACHE}.tmp" && mv "${EST_CACHE}.tmp" "$EST_CACHE"
-    fi
+    [ -z "$est_val" ] && est_val="0"
     cost_usd="$est_val"
     cost_is_estimate=1
 fi
