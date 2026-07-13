@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 2026-07-14
+
+- **Fixed**: daily "Today" total inflating massively when two or more sessions ran concurrently — the session-restart heuristic (cost decreased => bank previous run) fired on every alternation between sessions sharing one cost_budget.cache. The cache is now a per-session ledger (line 1 = date, then `<session_key>|<banked>|<latest>` per session) keyed by session_id
+- **Fixed** (Windows): JPY rate fetch could never complete — Start-Job children are killed when the parent statusline process exits (~100ms). Background work (rate fetch, cost estimate) now re-invokes statusline.ps1 as a detached process via Start-Process with -FetchJpyRate / -ComputeCostFor worker flags
+- **Fixed** (Windows): 0% gauge values were treated as missing (`-not $pct` is true for 0), causing spurious cache fallback; now compared against $null
+- **Fixed**: Bedrock model IDs (`us.anthropic.claude-*-YYYYMMDD-v1:0`) fell through to default Sonnet pricing in the cost estimator because region prefix and `-vN:0` suffix were never stripped — Opus-on-Bedrock costs were underestimated ~40%
+- **Changed**: cost estimate is now computed only in the background (bash: subshell; Windows: detached worker) — first render of a new transcript skips the cost segment instead of blocking on a potentially huge transcript; the estimator jq pass is now a single streaming `jq -Rn 'reduce inputs…'` (constant memory) and PowerShell uses `[IO.File]::ReadLines` streaming
+- **Changed**: gauge fallback cache and cost estimate cache are now multi-line, keyed per session / per transcript, so concurrent sessions no longer cross-contaminate or thrash each other's entries; unchanged-value renders skip the disk write
+- **Added**: `CC_STATUSLINE_BUDGET_JPY` (0 = amounts only, no bar) and `CC_STATUSLINE_JPY=0` (disable JPY entirely) env vars
+- **Added**: 1h back-off after a failed JPY rate fetch (jpy_rate.fail marker) instead of retrying every 30s while offline; a stale cached rate is now still displayed while a refresh is pending
+- **Added**: degraded fallback when jq is missing (model name + `[statusline: jq not found]`) instead of a silent blank statusline
+- **Fixed**: install.sh now works from any cwd (`cd "$(dirname "$0")"`), backs up settings.json before editing, and no longer half-installs when settings.json is invalid JSON; uninstall.sh cleans up all cache/lock/.tmp leftovers and also backs up settings.json
+- **Changed**: `export LC_NUMERIC=C` guards printf/awk number formatting on comma-decimal locales; temp files are PID-suffixed to avoid concurrent-writer collisions
+
 ## 2026-07-13
 
 - **Fixed**: JPY exchange rate fetch failing silently due to frankfurter.app -> frankfurter.dev domain migration (301 redirect not followed)

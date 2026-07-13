@@ -1,10 +1,18 @@
 #!/bin/bash
 set -e
+cd "$(dirname "$0")"
 
 DEST="$HOME/.claude"
 SETTINGS="$DEST/settings.json"
 
 echo "Installing claude-code-statusline..."
+
+if [ ! -f statusline.sh ]; then
+    echo "  Error: statusline.sh not found next to install.sh" >&2
+    exit 1
+fi
+
+mkdir -p "$DEST"
 
 # Copy script
 cp statusline.sh "$DEST/statusline.sh"
@@ -17,10 +25,18 @@ if [ ! -f "$SETTINGS" ]; then
 fi
 
 if command -v jq &>/dev/null; then
+    cp "$SETTINGS" "${SETTINGS}.bak"
     tmp=$(mktemp)
-    jq '. + {"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}}' "$SETTINGS" > "$tmp"
-    mv "$tmp" "$SETTINGS"
-    echo "  Updated $SETTINGS"
+    if jq '. + {"statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}}' "$SETTINGS" > "$tmp" && [ -s "$tmp" ]; then
+        mv "$tmp" "$SETTINGS"
+        echo "  Updated $SETTINGS (backup: ${SETTINGS}.bak)"
+    else
+        rm -f "$tmp"
+        echo ""
+        echo "  Could not update $SETTINGS (invalid JSON?). Backup kept at ${SETTINGS}.bak."
+        echo "  Please add the following manually:"
+        echo '  "statusLine": {"type": "command", "command": "~/.claude/statusline.sh"}'
+    fi
 else
     echo ""
     echo "  jq not found. Please add the following to $SETTINGS manually:"

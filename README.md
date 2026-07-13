@@ -137,10 +137,13 @@ Add to `%USERPROFILE%\.claude\settings.json`:
 
 ```
 ~/.claude/
-├── statusline.sh          # Linux / macOS / WSL
-├── statusline.ps1         # Native Windows
-├── jpy_rate.cache         # Exchange rate cache (auto-generated)
-└── cost_budget.cache      # Daily cost cache (auto-generated)
+├── statusline.sh            # Linux / macOS / WSL
+├── statusline.ps1           # Native Windows
+├── jpy_rate.cache           # Exchange rate cache (auto-generated)
+├── jpy_rate.fail            # Marker after a failed rate fetch: retries back off for 1h (auto-generated)
+├── cost_budget.cache        # Daily per-session cost ledger (auto-generated)
+├── cost_estimate.cache      # Transcript-based cost estimates, one line per transcript (auto-generated)
+└── statusline_gauges.cache  # Gauge fallback cache, one line per session (auto-generated)
 ```
 
 ### Cache file formats
@@ -151,25 +154,23 @@ Add to `%USERPROFILE%\.claude\settings.json`:
 e.g. 1751234567:157.23
 ```
 
-**`cost_budget.cache`**
+**`cost_budget.cache`** — line 1 is the date, then one line per session so
+concurrent sessions can't inflate each other's daily total:
 ```
-<YYYY-MM-DD>:<cumulative USD>:<last session USD>
-e.g. 2026-06-28:0.32:0.15
+<YYYY-MM-DD>
+<session_key>|<banked USD>|<latest session USD>
+e.g. 2026-06-28
+     3f2a…|0.32|0.15
 ```
 
 ## Customization
 
-To change the daily budget (default: ¥500):
+Set environment variables (in the shell that launches Claude Code):
 
-`statusline.sh`:
-```bash
-budget_jpy=500  # change this value
-```
-
-`statusline.ps1`:
-```powershell
-$budgetJpy = 500  # change this value
-```
+| Variable | Default | Effect |
+|---|---|---|
+| `CC_STATUSLINE_BUDGET_JPY` | `500` | Daily budget for the cost bar. `0` hides the bar and shows amounts only. |
+| `CC_STATUSLINE_JPY` | `1` | `0` disables the JPY conversion entirely (no network fetch, plain `$` display). |
 
 ## Troubleshooting
 

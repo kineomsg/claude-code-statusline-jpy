@@ -1,4 +1,7 @@
 #!/bin/bash
+# Locale-proof numeric formatting (printf/awk decimal points)
+export LC_NUMERIC=C
+
 input=$(cat)
 now=$(date +%s)
 
@@ -17,11 +20,34 @@ color_for_pct() {
     else printf "%s" "$C_GREEN"; fi
 }
 
+# 5-segment gauge; emits "filled + C_DIM + empty" (caller wraps with its own color/reset)
+draw_bar() {
+    local pct=$1 filled empty i fb="" eb=""
+    filled=$(( pct / 20 ))
+    [ "$filled" -gt 5 ] && filled=5
+    [ "$filled" -lt 0 ] && filled=0
+    empty=$(( 5 - filled ))
+    for ((i=0; i<filled; i++)); do fb="${fb}▰"; done
+    for ((i=0; i<empty; i++)); do eb="${eb}▱"; done
+    printf '%s' "${fb}${C_DIM}${eb}"
+}
+
 stat_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0; }
 add_commas() { printf '%d' "$1" | rev | sed 's/\([0-9]\{3\}\)/\1,/g' | sed 's/,$//' | rev; }
 
+# Degraded fallback: without jq we cannot parse the payload — show the model name
+# (best-effort sed extraction) plus an explicit hint instead of a silent blank line.
+if ! command -v jq >/dev/null 2>&1; then
+    md=$(printf '%s' "$input" | sed -n 's/.*"display_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
+    out=""
+    [ -n "$md" ] && out="${C_PURPLE}$(printf '%s' "$md" | tr -d ' ')${C_RESET} "
+    printf '%s' "${out}${C_DIM}[statusline: jq not found]${C_RESET}"
+    exit 0
+fi
+
 compute_cost_estimate() {
-    jq -R 'fromjson? // empty' "$1" 2>/dev/null | jq -s '
+    # Single streaming pass (no slurp): constant memory even on huge transcripts
+    jq -Rn '
         {
           "claude-opus-4-8": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
           "claude-opus-4-7": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
@@ -38,17 +64,20 @@ compute_cost_estimate() {
           "claude-mythos-5": {in:10.00, out:50.00, cwrite:12.50, cread:1.00}
         } as $p |
         def norm_model:
-            sub("^anthropic\\."; "") | sub("@.*$"; "") | sub("-[0-9]{8}$"; "");
-        ( [ .[]? | select(.type == "assistant") | .message // {} | select(.usage) |
-            { model: ((.model // "claude-sonnet-5") | norm_model), u: .usage } ] ) as $msgs |
-        (reduce $msgs[] as $m (0;
+            # us.anthropic.claude-*-20250929-v1:0 (Bedrock cross-region), anthropic.claude-*,
+            # claude-*@20250929 (Vertex), claude-*-20250929 (API) all normalize to the bare id
+            sub("^[a-z]+\\.anthropic\\."; "") | sub("^anthropic\\."; "") |
+            sub("@.*$"; "") | sub("-v[0-9]+:[0-9]+$"; "") | sub("-[0-9]{8}$"; "");
+        reduce (inputs | fromjson? | objects | select(.type == "assistant") | .message // {} | select(.usage)
+                | { model: ((.model // "claude-sonnet-5") | norm_model), u: .usage }) as $m
+        (0;
             . + (($p[$m.model] // $p["claude-sonnet-5"]) as $r |
                 (($m.u.input_tokens // 0) * $r.in +
                  ($m.u.output_tokens // 0) * $r.out +
                  ($m.u.cache_creation_input_tokens // 0) * $r.cwrite +
                  ($m.u.cache_read_input_tokens // 0) * $r.cread) / 1000000)
-        ))
-    ' 2>/dev/null
+        )
+    ' "$1" 2>/dev/null
 }
 
 # === Single jq call for all JSON fields ===
@@ -56,6 +85,7 @@ eval "$(echo "$input" | jq -r '
     "model_id="      + (.model.id // "" | @sh) + "\n" +
     "model_display=" + (.model.display_name // "" | @sh) + "\n" +
     "effort="        + (.effort.level // "" | @sh) + "\n" +
+    "session_id="    + (.session_id // "" | @sh) + "\n" +
     "h5_pct="        + (if .rate_limits.five_hour.used_percentage != null then (.rate_limits.five_hour.used_percentage | floor | tostring) else "" end | @sh) + "\n" +
     "h5_reset="      + (if .rate_limits.five_hour.resets_at != null then (.rate_limits.five_hour.resets_at | tostring) else "" end | @sh) + "\n" +
     "d7_pct="        + (if .rate_limits.seven_day.used_percentage != null then (.rate_limits.seven_day.used_percentage | floor | tostring) else "" end | @sh) + "\n" +
@@ -77,18 +107,30 @@ fi
 
 
 # === Gauge fallback cache (Claude Code omits context_window/rate_limits briefly after a mid-session model switch) ===
+# Multi-line, keyed by session_id (cwd fallback) so concurrent sessions in the same
+# directory never pick up each other's gauges.
 GAUGE_CACHE="$HOME/.claude/statusline_gauges.cache"
 GAUGE_TTL=20
-if [ -f "$GAUGE_CACHE" ]; then
-    IFS='|' read -r g_cwd g_ctx g_h5 g_h5r g_d7 g_d7r g_ts < "$GAUGE_CACHE"
-    if [ "$g_cwd" = "$cwd" ] && [ -n "$cwd" ] && [[ "$g_ts" =~ ^[0-9]+$ ]] && [ $(( now - g_ts )) -lt $GAUGE_TTL ]; then
+gauge_key="${session_id:-$cwd}"
+g_ctx="" g_h5="" g_h5r="" g_d7="" g_d7r="" g_ts=""
+if [ -n "$gauge_key" ] && [ -f "$GAUGE_CACHE" ]; then
+    IFS='|' read -r _ g_ctx g_h5 g_h5r g_d7 g_d7r g_ts <<< "$(awk -F'|' -v k="$gauge_key" '$1==k {print; exit}' "$GAUGE_CACHE" 2>/dev/null)"
+    if [[ "$g_ts" =~ ^[0-9]+$ ]] && [ $(( now - g_ts )) -lt $GAUGE_TTL ]; then
         [ -z "$ctx_pct" ] && [ -n "$g_ctx" ] && ctx_pct="$g_ctx"
         [ -z "$h5_pct" ] && [ -n "$g_h5" ] && h5_pct="$g_h5" && h5_reset="$g_h5r"
         [ -z "$d7_pct" ] && [ -n "$g_d7" ] && d7_pct="$g_d7" && d7_reset="$g_d7r"
     fi
 fi
-if [ -n "$cwd" ] && { [ -n "$ctx_pct" ] || [ -n "$h5_pct" ] || [ -n "$d7_pct" ]; }; then
-    echo "${cwd}|${ctx_pct}|${h5_pct}|${h5_reset:-0}|${d7_pct}|${d7_reset:-0}|${now}" > "$GAUGE_CACHE"
+if [ -n "$gauge_key" ] && { [ -n "$ctx_pct" ] || [ -n "$h5_pct" ] || [ -n "$d7_pct" ]; }; then
+    # skip the disk write while values are unchanged and the entry is still fresh
+    if [ "$g_ctx" != "$ctx_pct" ] || [ "$g_h5" != "$h5_pct" ] || [ "$g_h5r" != "${h5_reset:-0}" ] || \
+       [ "$g_d7" != "$d7_pct" ] || [ "$g_d7r" != "${d7_reset:-0}" ] || \
+       ! [[ "$g_ts" =~ ^[0-9]+$ ]] || [ $(( now - g_ts )) -ge $(( GAUGE_TTL / 2 )) ]; then
+        {
+            awk -F'|' -v k="$gauge_key" -v now="$now" 'NF==7 && $1 != k && (now - $7) < 3600' "$GAUGE_CACHE" 2>/dev/null
+            printf '%s|%s|%s|%s|%s|%s|%s\n' "$gauge_key" "$ctx_pct" "$h5_pct" "${h5_reset:-0}" "$d7_pct" "${d7_reset:-0}" "$now"
+        } > "${GAUGE_CACHE}.tmp.$$" && mv "${GAUGE_CACHE}.tmp.$$" "$GAUGE_CACHE"
+    fi
 fi
 
 fmt_reset_hm() {
@@ -108,28 +150,36 @@ fmt_reset_dh() {
     if [ $d -gt 0 ]; then echo "${d}d${h}h"; else echo "${h}h${m}m"; fi
 }
 
-# === JPY rate (weekly cache, background refresh) ===
+# === JPY rate (weekly cache, background refresh; CC_STATUSLINE_JPY=0 disables) ===
 JPY_CACHE="$HOME/.claude/jpy_rate.cache"
 JPY_LOCK="$HOME/.claude/jpy_rate.lock"
+JPY_FAIL="$HOME/.claude/jpy_rate.fail"
 jpy_rate=""
-if [ -f "$JPY_CACHE" ]; then
-    cached_ts=$(cut -d: -f1 "$JPY_CACHE" | head -n 1)
-    cached_rate=$(cut -d: -f2 "$JPY_CACHE" | head -n 1)
-    if [[ "$cached_ts" =~ ^[0-9]+$ ]] && [ $(( now - cached_ts )) -lt 604800 ] && [ -n "$cached_rate" ]; then
-        jpy_rate="$cached_rate"
+if [ "${CC_STATUSLINE_JPY:-1}" != "0" ]; then
+    jpy_fresh=""
+    if [ -f "$JPY_CACHE" ]; then
+        IFS=: read -r cached_ts cached_rate < "$JPY_CACHE"
+        if [ -n "$cached_rate" ]; then
+            jpy_rate="$cached_rate"   # a stale rate still beats no rate; refreshed below
+            [[ "$cached_ts" =~ ^[0-9]+$ ]] && [ $(( now - cached_ts )) -lt 604800 ] && jpy_fresh=1
+        fi
     fi
-fi
-if [ -z "$jpy_rate" ]; then
-    lock_age=$(( now - $(stat_mtime "$JPY_LOCK") ))
-    if [ "$lock_age" -gt 30 ]; then
-        touch "$JPY_LOCK" 2>/dev/null
-        (
-            fetched=$(curl -sf --max-time 5 "https://api.frankfurter.dev/v1/latest?from=USD&to=JPY" | jq -r '.rates.JPY // empty')
-            if [ -n "$fetched" ]; then
-                printf '%s:%s' "$now" "$fetched" > "${JPY_CACHE}.tmp" && mv "${JPY_CACHE}.tmp" "$JPY_CACHE"
-            fi
-            rm -f "$JPY_LOCK"
-        ) >/dev/null 2>&1 &
+    if [ -z "$jpy_fresh" ]; then
+        fail_age=$(( now - $(stat_mtime "$JPY_FAIL") ))
+        lock_age=$(( now - $(stat_mtime "$JPY_LOCK") ))
+        if [ "$fail_age" -gt 3600 ] && [ "$lock_age" -gt 30 ]; then
+            touch "$JPY_LOCK" 2>/dev/null
+            (
+                fetched=$(curl -sf --max-time 5 "https://api.frankfurter.dev/v1/latest?from=USD&to=JPY" | jq -r '.rates.JPY // empty')
+                if [ -n "$fetched" ]; then
+                    printf '%s:%s' "$now" "$fetched" > "${JPY_CACHE}.tmp.$$" && mv "${JPY_CACHE}.tmp.$$" "$JPY_CACHE"
+                    rm -f "$JPY_FAIL"
+                else
+                    touch "$JPY_FAIL" 2>/dev/null   # back off retries for 1h (offline/blocked)
+                fi
+                rm -f "$JPY_LOCK"
+            ) >/dev/null 2>&1 &
+        fi
     fi
 fi
 
@@ -174,15 +224,9 @@ fi
 
 # Context window
 if [ -n "$ctx_pct" ]; then
-    filled=$(( ctx_pct / 20 ))
-    [ $filled -gt 5 ] && filled=5
-    empty=$(( 5 - filled ))
     c=$(color_for_pct "$ctx_pct")
-    filled_bar="" empty_bar=""
-    for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
-    for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
     [ -n "$out" ] && out="$out "
-    out="${out}${C_DIM}Ctx:${C_RESET}${c}${filled_bar}${C_DIM}${empty_bar}${C_RESET}${c}${ctx_pct}%${C_RESET}"
+    out="${out}${C_DIM}Ctx:${C_RESET}${c}$(draw_bar "$ctx_pct")${C_RESET}${c}${ctx_pct}%${C_RESET}"
 fi
 
 # transcript_path fallback: some Claude Code versions/auth paths omit transcript_path
@@ -197,67 +241,79 @@ if [ -z "$transcript_path" ] && [ -n "$cwd" ]; then
 fi
 
 # === Fallback cost estimate (Claude Code omits cost.total_cost_usd for Azure/Bedrock/Vertex-routed sessions) ===
+# Always computed in the background — a large transcript must never block a render.
+# Cache holds one line per transcript so concurrent sessions don't thrash each other.
 cost_is_estimate=""
 if [ -z "$cost_usd" ] && [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then
     EST_CACHE="$HOME/.claude/cost_estimate.cache"
-    EST_LOCK="$HOME/.claude/cost_estimate.lock"
+    EST_LOCK="$HOME/.claude/cost_estimate.$(printf '%s' "$transcript_path" | cksum | cut -d' ' -f1).lock"
     t_mtime=$(stat_mtime "$transcript_path")
-    cached_path="" cached_mtime="" cached_val=""
-    if [ -f "$EST_CACHE" ]; then
-        cached_path=$(cut -d'|' -f1 "$EST_CACHE")
-        cached_mtime=$(cut -d'|' -f2 "$EST_CACHE")
-        cached_val=$(cut -d'|' -f3 "$EST_CACHE")
-    fi
-    est_val=""
-    if [ "$cached_path" = "$transcript_path" ] && [ "$cached_mtime" = "$t_mtime" ] && [ -n "$cached_val" ]; then
-        est_val="$cached_val"
-    else
-        [ "$cached_path" = "$transcript_path" ] && [ -n "$cached_val" ] && est_val="$cached_val"
+    IFS='|' read -r _ cached_mtime cached_val <<< "$(awk -F'|' -v k="$transcript_path" '$1==k {print; exit}' "$EST_CACHE" 2>/dev/null)"
+    if [ "$cached_mtime" != "$t_mtime" ]; then
         lock_age=$(( now - $(stat_mtime "$EST_LOCK") ))
         if [ "$lock_age" -gt 30 ]; then
             touch "$EST_LOCK" 2>/dev/null
             (
                 computed=$(compute_cost_estimate "$transcript_path")
                 if [ -n "$computed" ]; then
-                    printf '%s|%s|%s' "$transcript_path" "$t_mtime" "$computed" > "${EST_CACHE}.tmp" && mv "${EST_CACHE}.tmp" "$EST_CACHE"
+                    {
+                        awk -F'|' -v k="$transcript_path" '$1 != k' "$EST_CACHE" 2>/dev/null | tail -n 7
+                        printf '%s|%s|%s\n' "$transcript_path" "$t_mtime" "$computed"
+                    } > "${EST_CACHE}.tmp.$$" && mv "${EST_CACHE}.tmp.$$" "$EST_CACHE"
                 fi
                 rm -f "$EST_LOCK"
             ) >/dev/null 2>&1 &
         fi
-        if [ -z "$est_val" ]; then
-            est_val=$(compute_cost_estimate "$transcript_path")
-        fi
     fi
-    [ -z "$est_val" ] && est_val="0"
-    cost_usd="$est_val"
-    cost_is_estimate=1
+    if [ -n "$cached_val" ]; then
+        # show the last known value while the background refresh catches up;
+        # first render of a brand-new transcript just skips the cost segment once
+        cost_usd="$cached_val"
+        cost_is_estimate=1
+    fi
 fi
 
-# Daily cost
+# Daily cost — per-session ledger so concurrent sessions can't inflate the total.
+# Cache format: line 1 = date, then "<session_key>|<banked_usd>|<latest_session_usd>".
 # NOTE: jpy_rate is best-effort (fetched over the network); the $ cost must still
 # display even when the JPY conversion is unavailable (offline, blocked host, etc.)
 if [ -n "$cost_usd" ]; then
     BUDGET_CACHE="$HOME/.claude/cost_budget.cache"
     cur_date=$(date +%Y-%m-%d)
-    cumulative_usd="0"
-    last_session_usd="0"
-
-    if [ -f "$BUDGET_CACHE" ]; then
-        cached_date=$(cut -d: -f1 "$BUDGET_CACHE")
-        if [ "$cached_date" = "$cur_date" ]; then
-            cumulative_usd=$(cut -d: -f2 "$BUDGET_CACHE")
-            last_session_usd=$(cut -d: -f3 "$BUDGET_CACHE")
+    session_key="${session_id:-${transcript_path:-default}}"
+    accum="0"
+    last="0"
+    others=""
+    old_content=""
+    [ -f "$BUDGET_CACHE" ] && old_content=$(cat "$BUDGET_CACHE" 2>/dev/null)
+    if [ "${old_content%%$'\n'*}" = "$cur_date" ]; then
+        own_line=$(printf '%s\n' "$old_content" | awk -F'|' -v k="$session_key" 'NR>1 && $1==k {print; exit}')
+        if [ -n "$own_line" ]; then
+            IFS='|' read -r _ accum last <<< "$own_line"
+            [ -n "$accum" ] || accum="0"
+            [ -n "$last" ] || last="0"
         fi
+        others=$(printf '%s\n' "$old_content" | awk -F'|' -v k="$session_key" 'NR>1 && NF>=3 && $1!=k')
     fi
 
-    if awk -v cur="$cost_usd" -v last="$last_session_usd" 'BEGIN {exit !(cur < last)}' 2>/dev/null; then
-        cumulative_usd=$(awk -v cum="$cumulative_usd" -v last="$last_session_usd" 'BEGIN {print cum + last}')
+    # cost dropped => this session restarted (/clear, resume): bank the previous run
+    if awk -v cur="$cost_usd" -v last="$last" 'BEGIN {exit !(cur < last)}' 2>/dev/null; then
+        accum=$(awk -v a="$accum" -v l="$last" 'BEGIN {print a + l}')
     fi
-    printf '%s:%s:%s' "$cur_date" "$cumulative_usd" "$cost_usd" > "${BUDGET_CACHE}.tmp" && mv "${BUDGET_CACHE}.tmp" "$BUDGET_CACHE"
 
-    total_usd=$(awk -v cum="$cumulative_usd" -v cur="$cost_usd" 'BEGIN {print cum + cur}')
+    new_content="${cur_date}"$'\n'"${session_key}|${accum}|${cost_usd}"
+    [ -n "$others" ] && new_content="${new_content}"$'\n'"${others}"
+    if [ "$new_content" != "$old_content" ]; then
+        printf '%s\n' "$new_content" > "${BUDGET_CACHE}.tmp.$$" && mv "${BUDGET_CACHE}.tmp.$$" "$BUDGET_CACHE"
+    fi
+
+    others_sum=$(printf '%s\n' "$others" | awk -F'|' 'NF>=3 {s += $2 + $3} END {printf "%.6f", s+0}')
+    total_usd=$(awk -v a="$accum" -v c="$cost_usd" -v o="$others_sum" 'BEGIN {print a + c + o}')
     cost_fmt=$(printf "%.2f" "$total_usd")
     est_prefix=""; { [ -n "$cost_is_estimate" ] || [ -n "$is_subscriber" ]; } && est_prefix="~"
+
+    budget_jpy="${CC_STATUSLINE_BUDGET_JPY:-500}"
+    [[ "$budget_jpy" =~ ^[0-9]+$ ]] || budget_jpy=500
 
     if [ -n "$jpy_rate" ]; then
         total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
@@ -267,25 +323,22 @@ if [ -n "$cost_usd" ]; then
             if [ -n "$is_subscriber" ]; then
                 [ -n "$out" ] && out="$out "
                 out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}~\$${cost_fmt}${C_DIM}(${C_RESET}${C_GREEN}~¥$(add_commas "$total_jpy")${C_DIM})${C_RESET}"
-            else
-                budget_jpy=500
+            elif [ "$budget_jpy" -gt 0 ]; then
                 pct=$(( total_jpy * 100 / budget_jpy ))
                 [ $pct -gt 100 ] && pct=100
-                filled=$(( pct / 20 ))
-                empty=$(( 5 - filled ))
                 c=$(color_for_pct "$pct")
-                filled_bar="" empty_bar=""
-                for ((i=1; i<=filled; i++)); do filled_bar="${filled_bar}▰"; done
-                for ((i=1; i<=empty; i++)); do empty_bar="${empty_bar}▱"; done
-                bar="${filled_bar}${C_DIM}${empty_bar}"
-                [ -n "$out" ] && out="$out "
                 warn=""
                 [ $pct -ge 100 ] && warn="!!"
-                out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}${bar}${C_RESET}${c}${est_prefix}\$${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥$(add_commas "$session_jpy")${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥$(add_commas "$total_jpy")${C_DIM}/¥500)${C_RESET}"
+                [ -n "$out" ] && out="$out "
+                out="${out}${C_DIM}Cost:${C_RESET}${c}${warn}$(draw_bar "$pct")${C_RESET}${c}${est_prefix}\$${cost_fmt}${C_RESET}${C_DIM}(${C_RESET}${c}¥$(add_commas "$session_jpy")${C_RESET} ${C_DIM}Today:${C_RESET}${c}¥$(add_commas "$total_jpy")${C_DIM}/¥$(add_commas "$budget_jpy"))${C_RESET}"
+            else
+                # budget disabled (CC_STATUSLINE_BUDGET_JPY=0): amounts only, no bar
+                [ -n "$out" ] && out="$out "
+                out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}${est_prefix}\$${cost_fmt}${C_DIM}(${C_RESET}${C_GREEN}¥$(add_commas "$session_jpy")${C_RESET} ${C_DIM}Today:${C_RESET}${C_GREEN}¥$(add_commas "$total_jpy")${C_DIM})${C_RESET}"
             fi
         fi
     elif awk -v tot="$total_usd" 'BEGIN {exit !(tot > 0)}' 2>/dev/null; then
-        # JPY rate not yet cached (offline / blocked) — show plain $ amount, no bar/budget
+        # JPY rate not yet cached (offline / blocked / disabled) — show plain $ amount, no bar/budget
         [ -n "$out" ] && out="$out "
         out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}${est_prefix}\$${cost_fmt}${C_RESET}"
     fi
