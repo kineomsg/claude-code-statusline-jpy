@@ -175,6 +175,17 @@ if [ -n "$ctx_pct" ]; then
     out="${out}${C_DIM}Ctx:${C_RESET}${c}${filled_bar}${C_DIM}${empty_bar}${C_RESET}${c}${ctx_pct}%${C_RESET}"
 fi
 
+# transcript_path fallback: some Claude Code versions/auth paths omit transcript_path
+# from the statusLine hook JSON. Locate the most recently modified transcript in the
+# project-specific directory (derived from cwd, same convention Claude Code itself uses)
+# as a best-effort substitute.
+if [ -z "$transcript_path" ] && [ -n "$cwd" ]; then
+    proj_dir="$HOME/.claude/projects/$(printf '%s' "$cwd" | tr '/' '-')"
+    if [ -d "$proj_dir" ]; then
+        transcript_path=$(ls -t "$proj_dir"/*.jsonl 2>/dev/null | head -n 1)
+    fi
+fi
+
 # === Fallback cost estimate (Claude Code omits cost.total_cost_usd for Azure/Bedrock/Vertex-routed sessions) ===
 cost_is_estimate=""
 if [ -z "$cost_usd" ] && [ -n "$transcript_path" ] && [ -f "$transcript_path" ]; then

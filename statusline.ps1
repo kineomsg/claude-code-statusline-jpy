@@ -205,9 +205,22 @@ function Get-CostEstimate($path) {
     return $total
 }
 
+# transcript_path fallback: some Claude Code versions/auth paths omit transcript_path
+# from the statusLine hook JSON. Locate the most recently modified transcript in the
+# project-specific directory (derived from cwd, same convention Claude Code itself uses)
+# as a best-effort substitute.
+$transcriptPath = $data.transcript_path
+if ([string]::IsNullOrWhiteSpace($transcriptPath) -and -not [string]::IsNullOrWhiteSpace($cwd)) {
+    $projDir = Join-Path $HOME (".claude/projects/" + ($cwd -replace '/', '-'))
+    if (Test-Path -LiteralPath $projDir) {
+        $latest = Get-ChildItem -LiteralPath $projDir -Filter '*.jsonl' -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($null -ne $latest) { $transcriptPath = $latest.FullName }
+    }
+}
+
 # === Fallback cost estimate (Claude Code omits cost.total_cost_usd for Azure/Bedrock/Vertex-routed sessions) ===
 $costIsEstimate = $false
-$transcriptPath = $data.transcript_path
 if ($null -eq $costUsd -and -not [string]::IsNullOrWhiteSpace($transcriptPath) -and (Test-Path -LiteralPath $transcriptPath)) {
     $estCachePath = Join-Path $HOME '.claude/cost_estimate.cache'
     $tMtime = [long]((Get-Item -LiteralPath $transcriptPath).LastWriteTimeUtc - [datetime]'1970-01-01').TotalSeconds
