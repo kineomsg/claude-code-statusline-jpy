@@ -2,7 +2,11 @@
 
 対象: statusline.sh / statusline.ps1 / install.sh / uninstall.sh
 レビュアー: Claude Code (Fable 5)
-**ステータス: 全指摘は同日中に修正済み**（詳細は CHANGELOG.md 2026-07-14 参照）。bash 版は fake HOME 環境でテスト済み。**statusline.ps1 はこのサーバーに PowerShell が無いため未検証** — Windows 環境での動作確認が必要。
+**ステータス: 完了。修正・テスト・コミット・pushまで完了済み。**
+
+- 公開リポジトリ `claude-code-statusline-jpy`: commit `98ab319` → `origin/main` push済み
+- 実運用デプロイ先 `dotfiles-claude`（`~/.claude/statusline.sh` のリンク先）: commit `4697927` → `origin/master` push済み。この環境の実ステータスラインに反映済み
+- bash 版は fake HOME 環境でテスト済み。**statusline.ps1 はこのサーバーに PowerShell が無いため未検証** — Windows 環境での動作確認が必要（唯一の残タスク）
 
 ## バグ（修正済み）
 
@@ -46,4 +50,5 @@
 ## 残タスク
 
 - [ ] statusline.ps1 の Windows 実機検証（Start-Process ワーカー、EncodedCommand 不使用の -File 起動、パスにスペースを含むユーザー名）
-- [ ] git commit（ユーザー指示により保留中。dotfiles-claude/statusline.sh へのコピー同期は済・未コミット）
+- [x] ~~git commit~~ → 完了（2026-07-14、両リポジトリともpush済み。上記参照）
+- [ ] Mac側の `dotfiles-claude` pull（別課題、[[project_mac_ubuntu_config_drift]]参照。今回の修正はMac側に未反映）
