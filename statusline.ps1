@@ -143,11 +143,51 @@ $C_GREEN  = "$ESC[38;2;130;180;100m"   # healthy (<60%)
 $C_AMBER  = "$ESC[38;2;229;192;123m"   # warning (>=60%) / Opus !
 $C_RED    = "$ESC[38;2;224;108;117m"   # critical (>=80%) / Fable !!
 $C_DIM    = "$ESC[38;2;92;99;112m"     # labels
+$SessionWindowSec = 18000
+$WeekWindowSec    = 604800
 
 function Get-ColorForPct($pct) {
     if ($pct -ge 80) { return $C_RED }
     elseif ($pct -ge 60) { return $C_AMBER }
     else { return $C_GREEN }
+}
+
+function Get-PacePct($pct, $resetAt, $windowSec) {
+    if ($null -eq $resetAt -or $resetAt -eq "" -or $resetAt -eq 0) {
+        return $pct
+    }
+    $diff = $resetAt - $now
+    if ($diff -le 0) {
+        return $pct
+    }
+    $elapsed = $windowSec - $diff
+    if ($elapsed * 20 -lt $windowSec) {
+        return $pct
+    }
+    $projected = [Math]::Floor($pct * $windowSec / $elapsed)
+    if ($projected -gt 999) {
+        $projected = 999
+    }
+    return $projected
+}
+
+function Get-ColorForRate($pct, $resetAt, $windowSec) {
+    $rawColor = "green"
+    if ($pct -ge 80) { $rawColor = "red" }
+    elseif ($pct -ge 60) { $rawColor = "amber" }
+
+    $projected = Get-PacePct $pct $resetAt $windowSec
+    $paceColor = "green"
+    if ($projected -ge 150) { $paceColor = "red" }
+    elseif ($projected -ge 110) { $paceColor = "amber" }
+
+    if ($rawColor -eq "red" -or $paceColor -eq "red") {
+        return $C_RED
+    } elseif ($rawColor -eq "amber" -or $paceColor -eq "amber") {
+        return $C_AMBER
+    } else {
+        return $C_GREEN
+    }
 }
 
 # 5-segment gauge; emits "filled + C_DIM + empty" (caller wraps with its own color/reset)
@@ -271,7 +311,7 @@ if ($modelDisplay) {
 
 if ($null -ne $h5_pct) {
     $rst = Get-ResetHM $h5_reset
-    $c   = Get-ColorForPct $h5_pct
+    $c   = Get-ColorForRate $h5_pct $h5_reset $SessionWindowSec
     if ($out) { $out += " " }
     $out += "${C_DIM}Session:${C_RESET}${c}${h5_pct}%${C_DIM}(${rst})${C_RESET}"
 } elseif ($isMaxNoRl) {
@@ -280,7 +320,7 @@ if ($null -ne $h5_pct) {
 }
 if ($null -ne $d7_pct) {
     $rst = Get-ResetDH $d7_reset
-    $c   = Get-ColorForPct $d7_pct
+    $c   = Get-ColorForRate $d7_pct $d7_reset $WeekWindowSec
     if ($out) { $out += " " }
     $out += "${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
 } elseif ($isMaxNoRl) {

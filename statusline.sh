@@ -12,12 +12,66 @@ C_GREEN=$'\e[38;2;130;180;100m'    # healthy (<60%)
 C_AMBER=$'\e[38;2;229;192;123m'    # warning (>=60%) / Opus !
 C_RED=$'\e[38;2;224;108;117m'      # critical (>=80%) / Fable !!
 C_DIM=$'\e[38;2;92;99;112m'        # labels
+SESSION_WINDOW_SEC=18000
+WEEK_WINDOW_SEC=604800
 
 color_for_pct() {
     local pct=$1
     if [ "$pct" -ge 80 ]; then printf "%s" "$C_RED"
     elif [ "$pct" -ge 60 ]; then printf "%s" "$C_AMBER"
     else printf "%s" "$C_GREEN"; fi
+}
+
+pace_pct() {
+    local pct=$1
+    local reset_at=$2
+    local window_sec=$3
+    if [ -z "$reset_at" ]; then
+        echo "$pct"
+        return
+    fi
+    local diff=$(( reset_at - now ))
+    if [ "$diff" -le 0 ]; then
+        echo "$pct"
+        return
+    fi
+    local elapsed=$(( window_sec - diff ))
+    if [ $(( elapsed * 20 )) -lt "$window_sec" ]; then
+        echo "$pct"
+        return
+    fi
+    local projected=$(( pct * window_sec / elapsed ))
+    if [ "$projected" -gt 999 ]; then
+        projected=999
+    fi
+    echo "$projected"
+}
+
+color_for_rate() {
+    local pct=$1
+    local reset_at=$2
+    local window_sec=$3
+
+    local raw_color
+    if [ "$pct" -ge 80 ]; then raw_color="red"
+    elif [ "$pct" -ge 60 ]; then raw_color="amber"
+    else raw_color="green"; fi
+
+    local projected
+    projected=$(pace_pct "$pct" "$reset_at" "$window_sec")
+
+    local pace_color
+    if [ "$projected" -ge 150 ]; then pace_color="red"
+    elif [ "$projected" -ge 110 ]; then pace_color="amber"
+    else pace_color="green"; fi
+
+    if [ "$raw_color" = "red" ] || [ "$pace_color" = "red" ]; then
+        printf "%s" "$C_RED"
+    elif [ "$raw_color" = "amber" ] || [ "$pace_color" = "amber" ]; then
+        printf "%s" "$C_AMBER"
+    else
+        printf "%s" "$C_GREEN"
+    fi
 }
 
 # 5-segment gauge; emits "filled + C_DIM + empty" (caller wraps with its own color/reset)
@@ -203,7 +257,7 @@ fi
 # Session rate limit
 if [ -n "$h5_pct" ]; then
     rst=$(fmt_reset_hm "$h5_reset")
-    c=$(color_for_pct "$h5_pct")
+    c=$(color_for_rate "$h5_pct" "$h5_reset" $SESSION_WINDOW_SEC)
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Session:${C_RESET}${c}${h5_pct}%${C_DIM}(${rst})${C_RESET}"
 elif [ -z "$has_rl" ] && [ -n "$model_display" ] && [ -n "$is_subscriber" ]; then
@@ -214,7 +268,7 @@ fi
 # Week rate limit
 if [ -n "$d7_pct" ]; then
     rst=$(fmt_reset_dh "$d7_reset")
-    c=$(color_for_pct "$d7_pct")
+    c=$(color_for_rate "$d7_pct" "$d7_reset" $WEEK_WINDOW_SEC)
     [ -n "$out" ] && out="$out "
     out="${out}${C_DIM}Week:${C_RESET}${c}${d7_pct}%${C_DIM}(${rst})${C_RESET}"
 elif [ -z "$has_rl" ] && [ -n "$model_display" ] && [ -n "$is_subscriber" ]; then

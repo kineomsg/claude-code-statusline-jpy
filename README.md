@@ -47,6 +47,13 @@ Fable5 user:
 | `Ctx:▰▰▱▱▱XX%` | Context window usage (5-segment bar) |
 | `Cost:▰▱▱▱▱$X.XX(¥XXX Today:¥XXX/¥500)` | Daily total in USD, current session and daily total in JPY with budget bar |
 
+**Session/Week color behavior:**
+- The displayed percentage is always your raw usage, but the *color* also factors in pace: given how much of the 5-hour/7-day window has elapsed, will you exhaust the limit before it resets?
+- A steady, constant rate of usage always lands close to 100% by definition when the window resets — that's normal, expected utilization, not a warning sign. So the pace signal uses its own thresholds (green below 110% projected, amber 110-150%, red 150%+) rather than the raw 60%/80% thresholds
+- The raw usage thresholds (60%/80%) still apply independently — if your actual usage is already high late in the window, it shows red/amber regardless of pace
+- The final color is whichever of the two signals (raw usage or pace) is more severe
+- Pace is only considered once at least 5% of the window has elapsed, to avoid noisy projections right after a reset
+
 **Cost display behavior:**
 - First value (`¥XXX`) is the **current session** cost; `Today:¥XXX/¥500` is the **daily cumulative** total across all sessions
 - Daily total resets automatically at midnight

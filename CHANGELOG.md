@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 2026-07-15
+
+- **Changed**: Session/Week gauge colors now factor in pace, not just raw usage percentage. A projected end-of-window landing percentage is computed from elapsed time within the 5-hour/7-day window (skipped for the first 5% of the window to avoid noise), using its own thresholds (green <110%, amber 110-150%, red 150%+) since steady/on-pace usage naturally projects to ~100% and shouldn't be flagged. The final color is the more severe of the raw-usage color (existing 60%/80% thresholds) and the pace color, so genuinely high raw usage late in the window still warns regardless of pace
+
 ## 2026-07-14
 
 - **Fixed**: daily "Today" total inflating massively when two or more sessions ran concurrently — the session-restart heuristic (cost decreased => bank previous run) fired on every alternation between sessions sharing one cost_budget.cache. The cache is now a per-session ledger (line 1 = date, then `<session_key>|<banked>|<latest>` per session) keyed by session_id
