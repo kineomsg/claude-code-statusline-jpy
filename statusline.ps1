@@ -3,6 +3,7 @@ param(
     [switch]$FetchJpyRate
 )
 
+[System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
 $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 
 # Shared cache paths
