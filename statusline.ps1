@@ -26,6 +26,11 @@ function Get-PathLockSuffix($s) {
 }
 
 function Get-CostEstimate($path) {
+    $sonnet5Rates = if ((Get-Date) -lt [datetime]'2026-09-01') {
+        @{ In = 2.00;  Out = 10.00; CWrite = 2.50;  CRead = 0.20 }
+    } else {
+        @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
+    }
     $priceTable = @{
         'claude-opus-4-8'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
         'claude-opus-4-7'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
@@ -33,7 +38,7 @@ function Get-CostEstimate($path) {
         'claude-opus-4-5'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
         'claude-opus-4-1'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
         'claude-opus-4-0'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
-        'claude-sonnet-5'   = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
+        'claude-sonnet-5'   = $sonnet5Rates
         'claude-sonnet-4-6' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
         'claude-sonnet-4-5' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
         'claude-sonnet-4-0' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }

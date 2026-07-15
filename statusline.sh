@@ -101,7 +101,7 @@ fi
 
 compute_cost_estimate() {
     # Single streaming pass (no slurp): constant memory even on huge transcripts
-    jq -Rn '
+    jq -Rn --arg today "$(date +%Y-%m-%d)" '
         {
           "claude-opus-4-8": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
           "claude-opus-4-7": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
@@ -109,7 +109,7 @@ compute_cost_estimate() {
           "claude-opus-4-5": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
           "claude-opus-4-1": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
           "claude-opus-4-0": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
-          "claude-sonnet-5": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
+          "claude-sonnet-5": (if $today < "2026-09-01" then {in:2.00, out:10.00, cwrite:2.50, cread:0.20} else {in:3.00, out:15.00, cwrite:3.75, cread:0.30} end),
           "claude-sonnet-4-6": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
           "claude-sonnet-4-5": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
           "claude-sonnet-4-0": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
