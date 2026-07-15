@@ -426,51 +426,111 @@ if ($null -eq $costUsd -and -not [string]::IsNullOrWhiteSpace($transcriptPath) -
 }
 
 # Daily cost — per-session ledger so concurrent sessions can't inflate the total.
-# Cache format: line 1 = date, then "<session_key>|<banked_usd>|<latest_session_usd>".
+# Cache format: line 1 = date, then "<session_key>|<baseline_usd>|<banked_usd>|<latest_session_usd>".
+# baseline is the session's cumulative costUsd as of the start of "today" (0 for a
+# session that began today, or its last known costUsd from a previous day for a
+# session still running across a midnight boundary) so only the delta actually
+# spent today is counted, not the whole session-lifetime total. A separate
+# cross-day cache (sessionStateCachePath) is never wiped daily and supplies that
+# baseline the first time a still-running session is seen on a new date.
 # NOTE: jpyRate is best-effort (fetched over the network); the $ cost must still
 # display even when the JPY conversion is unavailable (offline, blocked host, etc.)
 if ($null -ne $costUsd) {
+    $sessionStateCachePath = Join-Path $HOME '.claude/cost_session_state.cache'
     $curDate    = (Get-Date).ToString("yyyy-MM-dd")
     $sessionKey = if (-not [string]::IsNullOrWhiteSpace($sessionId)) { $sessionId }
                   elseif (-not [string]::IsNullOrWhiteSpace($transcriptPath)) { $transcriptPath }
                   else { 'default' }
-    $accum  = 0.0
-    $last   = 0.0
-    $others = @()
+    $baseline = 0.0
+    $accum    = 0.0
+    $last     = 0.0
+    $others   = @()
+    $ownFound = $false
     $oldLines = @()
     if (Test-Path $budgetCachePath) { $oldLines = @(Get-Content $budgetCachePath -ErrorAction SilentlyContinue) }
     if ($oldLines.Count -ge 1 -and $oldLines[0] -eq $curDate) {
         foreach ($l in ($oldLines | Select-Object -Skip 1)) {
             if ([string]::IsNullOrWhiteSpace($l)) { continue }
-            $p = $l -split '\|', 3
-            if ($p.Count -ne 3) { continue }
-            if ($p[0] -eq $sessionKey) {
+            $p = $l -split '\|'
+            if ($p.Count -eq 4 -and $p[0] -eq $sessionKey) {
+                $ownFound = $true
+                $b  = $p[1] -as [double]; if ($null -ne $b)  { $baseline = $b }
+                $a  = $p[2] -as [double]; if ($null -ne $a)  { $accum    = $a }
+                $ls = $p[3] -as [double]; if ($null -ne $ls) { $last     = $ls }
+            } elseif ($p.Count -eq 3 -and $p[0] -eq $sessionKey) {
+                # legacy 3-field format: key|banked|latest (baseline implicitly 0)
+                $ownFound = $true
                 $a  = $p[1] -as [double]; if ($null -ne $a)  { $accum = $a }
                 $ls = $p[2] -as [double]; if ($null -ne $ls) { $last  = $ls }
-            } else {
+            } elseif ($p.Count -ge 3 -and $p[0] -ne $sessionKey) {
                 $others += $l
             }
         }
     }
 
-    # cost dropped => this session restarted (/clear, resume): bank the previous run
-    if ($costUsd -lt $last) { $accum += $last }
+    if (-not $ownFound) {
+        # First render of this session today (brand-new session, or the day just
+        # rolled over while this session kept running). Look up its last known
+        # cost from the cross-day cache to use as today's starting offset.
+        if (Test-Path $sessionStateCachePath) {
+            $stateLine = Get-Content $sessionStateCachePath -ErrorAction SilentlyContinue |
+                Where-Object { ($_ -split '\|')[0] -eq $sessionKey } | Select-Object -First 1
+            if ($stateLine) {
+                $sp = $stateLine -split '\|'
+                if ($sp.Count -eq 3) {
+                    $sc = $sp[2] -as [double]
+                    if ($null -ne $sc) { $baseline = $sc }
+                }
+            }
+        }
+        $accum = 0.0
+        $last  = $costUsd
+    }
 
-    $newLines = @($curDate, "$sessionKey|$accum|$costUsd") + $others
+    # cost dropped => this session restarted (/clear, resume): Claude Code's own
+    # costUsd counter already restarts at zero in this case, so bank the
+    # contribution accrued so far and reset baseline to zero (not costUsd —
+    # a nonzero baseline is only for the day-rollover case, where the counter
+    # keeps counting rather than resetting)
+    if ($costUsd -lt $last) {
+        $accum += ($last - $baseline)
+        $baseline = 0.0
+    }
+
+    $newLines = @($curDate, "$sessionKey|$baseline|$accum|$costUsd") + $others
     if (($newLines -join "`n") -ne ($oldLines -join "`n")) {
         $tmp = "${budgetCachePath}.tmp.$PID"
         Set-Content -Path $tmp -Value $newLines
         Move-Item -Force $tmp $budgetCachePath
     }
 
+    # Persist this session's latest cost (cross-day, never wiped) so a future day
+    # rollover can compute the correct baseline for this session if it is still running.
+    $keepState = @()
+    if (Test-Path $sessionStateCachePath) {
+        $keepState = @(Get-Content $sessionStateCachePath -ErrorAction SilentlyContinue |
+            Where-Object { $_ -and ($_ -split '\|')[0] -ne $sessionKey } | Select-Object -Last 49)
+    }
+    $keepState += "$sessionKey|$curDate|$costUsd"
+    $stateTmp = "${sessionStateCachePath}.tmp.$PID"
+    Set-Content -Path $stateTmp -Value $keepState
+    Move-Item -Force $stateTmp $sessionStateCachePath
+
     $othersSum = 0.0
     foreach ($l in $others) {
-        $p = $l -split '\|', 3
-        $a  = $p[1] -as [double]; if ($null -ne $a)  { $othersSum += $a }
-        $c2 = $p[2] -as [double]; if ($null -ne $c2) { $othersSum += $c2 }
+        $p = $l -split '\|'
+        if ($p.Count -eq 4) {
+            $b2 = $p[1] -as [double]; $a2 = $p[2] -as [double]; $l2 = $p[3] -as [double]
+            if ($null -ne $a2) { $othersSum += $a2 }
+            if ($null -ne $l2 -and $null -ne $b2) { $othersSum += ($l2 - $b2) }
+        } elseif ($p.Count -eq 3) {
+            $a2 = $p[1] -as [double]; $l2 = $p[2] -as [double]
+            if ($null -ne $a2) { $othersSum += $a2 }
+            if ($null -ne $l2) { $othersSum += $l2 }
+        }
     }
 
-    $totalUsd  = $accum + $costUsd + $othersSum
+    $totalUsd  = $accum + ($costUsd - $baseline) + $othersSum
     $costFmt   = "{0:F2}" -f $totalUsd
     $estPrefix = if ($costIsEstimate -or $isSubscriber) { "~" } else { "" }
 
@@ -480,7 +540,7 @@ if ($null -ne $costUsd) {
 
     if ($null -ne $jpyRate) {
         $totalJpy   = [long][Math]::Floor($totalUsd * $jpyRate + 0.5)
-        $sessionJpy = [long][Math]::Floor($costUsd  * $jpyRate + 0.5)
+        $sessionJpy = [long][Math]::Floor(($costUsd - $baseline) * $jpyRate + 0.5)
 
         if ($totalJpy -gt 0) {
             $totalJpyFmt   = "{0:N0}" -f $totalJpy

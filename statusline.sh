@@ -328,41 +328,89 @@ if [ -z "$cost_usd" ] && [ -n "$transcript_path" ] && [ -f "$transcript_path" ];
 fi
 
 # Daily cost — per-session ledger so concurrent sessions can't inflate the total.
-# Cache format: line 1 = date, then "<session_key>|<banked_usd>|<latest_session_usd>".
+# Cache format: line 1 = date, then "<session_key>|<baseline_usd>|<banked_usd>|<latest_session_usd>".
+# baseline is the session's cumulative cost_usd as of the start of "today" (0 for a
+# session that began today, or its last known cost_usd from a previous day for a
+# session still running across a midnight boundary) so only the delta actually
+# spent today is counted, not the whole session-lifetime total. A separate
+# cross-day cache (SESSION_STATE_CACHE) is never wiped daily and supplies that
+# baseline the first time a still-running session is seen on a new date.
 # NOTE: jpy_rate is best-effort (fetched over the network); the $ cost must still
 # display even when the JPY conversion is unavailable (offline, blocked host, etc.)
 if [ -n "$cost_usd" ]; then
     BUDGET_CACHE="$HOME/.claude/cost_budget.cache"
+    SESSION_STATE_CACHE="$HOME/.claude/cost_session_state.cache"
     cur_date=$(date +%Y-%m-%d)
     session_key="${session_id:-${transcript_path:-default}}"
+    baseline="0"
     accum="0"
     last="0"
     others=""
+    own_found=""
     old_content=""
     [ -f "$BUDGET_CACHE" ] && old_content=$(cat "$BUDGET_CACHE" 2>/dev/null)
     if [ "${old_content%%$'\n'*}" = "$cur_date" ]; then
         own_line=$(printf '%s\n' "$old_content" | awk -F'|' -v k="$session_key" 'NR>1 && $1==k {print; exit}')
         if [ -n "$own_line" ]; then
-            IFS='|' read -r _ accum last <<< "$own_line"
+            own_found=1
+            IFS='|' read -r _ f2 f3 f4 <<< "$own_line"
+            if [ -n "$f4" ]; then
+                # current 4-field format: key|baseline|banked|latest
+                baseline="$f2"; accum="$f3"; last="$f4"
+            else
+                # legacy 3-field format: key|banked|latest (baseline implicitly 0)
+                baseline="0"; accum="$f2"; last="$f3"
+            fi
+            [ -n "$baseline" ] || baseline="0"
             [ -n "$accum" ] || accum="0"
             [ -n "$last" ] || last="0"
         fi
         others=$(printf '%s\n' "$old_content" | awk -F'|' -v k="$session_key" 'NR>1 && NF>=3 && $1!=k')
     fi
 
-    # cost dropped => this session restarted (/clear, resume): bank the previous run
-    if awk -v cur="$cost_usd" -v last="$last" 'BEGIN {exit !(cur < last)}' 2>/dev/null; then
-        accum=$(awk -v a="$accum" -v l="$last" 'BEGIN {print a + l}')
+    if [ -z "$own_found" ]; then
+        # First render of this session today (brand-new session, or the day just
+        # rolled over while this session kept running). Look up its last known
+        # cost from the cross-day cache to use as today's starting offset.
+        if [ -f "$SESSION_STATE_CACHE" ]; then
+            state_line=$(awk -F'|' -v k="$session_key" '$1==k {print; exit}' "$SESSION_STATE_CACHE" 2>/dev/null)
+            if [ -n "$state_line" ]; then
+                IFS='|' read -r _ _ state_cost <<< "$state_line"
+                [ -n "$state_cost" ] && baseline="$state_cost"
+            fi
+        fi
+        accum="0"
+        last="$cost_usd"
     fi
 
-    new_content="${cur_date}"$'\n'"${session_key}|${accum}|${cost_usd}"
+    # cost dropped => this session restarted (/clear, resume): Claude Code's own
+    # cost_usd counter already restarts at zero in this case, so bank the
+    # contribution accrued so far and reset baseline to zero (not cost_usd —
+    # a nonzero baseline is only for the day-rollover case, where the counter
+    # keeps counting rather than resetting)
+    if awk -v cur="$cost_usd" -v last="$last" 'BEGIN {exit !(cur < last)}' 2>/dev/null; then
+        accum=$(awk -v a="$accum" -v l="$last" -v b="$baseline" 'BEGIN {print a + (l - b)}')
+        baseline="0"
+    fi
+
+    new_content="${cur_date}"$'\n'"${session_key}|${baseline}|${accum}|${cost_usd}"
     [ -n "$others" ] && new_content="${new_content}"$'\n'"${others}"
     if [ "$new_content" != "$old_content" ]; then
         printf '%s\n' "$new_content" > "${BUDGET_CACHE}.tmp.$$" && mv "${BUDGET_CACHE}.tmp.$$" "$BUDGET_CACHE"
     fi
 
-    others_sum=$(printf '%s\n' "$others" | awk -F'|' 'NF>=3 {s += $2 + $3} END {printf "%.6f", s+0}')
-    total_usd=$(awk -v a="$accum" -v c="$cost_usd" -v o="$others_sum" 'BEGIN {print a + c + o}')
+    # Persist this session's latest cost (cross-day, never wiped) so a future day
+    # rollover can compute the correct baseline for this session if it is still running.
+    {
+        [ -f "$SESSION_STATE_CACHE" ] && awk -F'|' -v k="$session_key" '$1!=k' "$SESSION_STATE_CACHE" 2>/dev/null | tail -n 49
+        printf '%s|%s|%s\n' "$session_key" "$cur_date" "$cost_usd"
+    } > "${SESSION_STATE_CACHE}.tmp.$$" && mv "${SESSION_STATE_CACHE}.tmp.$$" "$SESSION_STATE_CACHE"
+
+    others_sum=$(printf '%s\n' "$others" | awk -F'|' '
+        NF>=4 {s += $3 + ($4 - $2); next}
+        NF==3 {s += $2 + $3}
+        END {printf "%.6f", s+0}')
+    total_usd=$(awk -v a="$accum" -v c="$cost_usd" -v b="$baseline" -v o="$others_sum" 'BEGIN {print a + (c - b) + o}')
     cost_fmt=$(printf "%.2f" "$total_usd")
     est_prefix=""; { [ -n "$cost_is_estimate" ] || [ -n "$is_subscriber" ]; } && est_prefix="~"
 
@@ -371,7 +419,7 @@ if [ -n "$cost_usd" ]; then
 
     if [ -n "$jpy_rate" ]; then
         total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
-        session_jpy=$(awk -v cur="$cost_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", cur * rate + 0.5}')
+        session_jpy=$(awk -v cur="$cost_usd" -v base="$baseline" -v rate="$jpy_rate" 'BEGIN {printf "%d", (cur - base) * rate + 0.5}')
 
         if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
             if [ -n "$is_subscriber" ]; then

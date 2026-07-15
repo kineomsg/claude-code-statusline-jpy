@@ -16,6 +16,7 @@ done
 
 # Remove cache/lock files (including interrupted-write .tmp leftovers and per-path locks)
 for f in jpy_rate.cache jpy_rate.lock jpy_rate.fail cost_budget.cache \
+         cost_session_state.cache \
          statusline_gauges.cache cost_estimate.cache cost_estimate.lock; do
     if [ -e "$DEST/$f" ]; then
         rm -f "$DEST/$f"
