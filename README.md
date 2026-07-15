@@ -144,13 +144,14 @@ Add to `%USERPROFILE%\.claude\settings.json`:
 
 ```
 ~/.claude/
-├── statusline.sh            # Linux / macOS / WSL
-├── statusline.ps1           # Native Windows
-├── jpy_rate.cache           # Exchange rate cache (auto-generated)
-├── jpy_rate.fail            # Marker after a failed rate fetch: retries back off for 1h (auto-generated)
-├── cost_budget.cache        # Daily per-session cost ledger (auto-generated)
-├── cost_estimate.cache      # Transcript-based cost estimates, one line per transcript (auto-generated)
-└── statusline_gauges.cache  # Gauge fallback cache, one line per session (auto-generated)
+├── statusline.sh              # Linux / macOS / WSL
+├── statusline.ps1             # Native Windows
+├── jpy_rate.cache             # Exchange rate cache (auto-generated)
+├── jpy_rate.fail              # Marker after a failed rate fetch: retries back off for 1h (auto-generated)
+├── cost_budget.cache          # Daily per-session cost ledger (auto-generated)
+├── cost_session_state.cache   # Cross-day per-session cost snapshot, never wiped daily (auto-generated)
+├── cost_estimate.cache        # Transcript-based cost estimates, one line per transcript (auto-generated)
+└── statusline_gauges.cache    # Gauge fallback cache, one line per session (auto-generated)
 ```
 
 ### Cache file formats
@@ -162,12 +163,25 @@ e.g. 1751234567:157.23
 ```
 
 **`cost_budget.cache`** — line 1 is the date, then one line per session so
-concurrent sessions can't inflate each other's daily total:
+concurrent sessions can't inflate each other's daily total. `baseline` is the
+session's cumulative cost as of the start of today (0 for a session that began
+today, or a snapshot from `cost_session_state.cache` for a session still
+running across a midnight boundary), so only the delta actually spent today
+counts toward the total:
 ```
 <YYYY-MM-DD>
-<session_key>|<banked USD>|<latest session USD>
+<session_key>|<baseline USD>|<banked USD>|<latest session USD>
 e.g. 2026-06-28
-     3f2a…|0.32|0.15
+     3f2a…|0.00|0.32|0.15
+```
+
+**`cost_session_state.cache`** — never wiped at midnight (unlike
+`cost_budget.cache`); keeps the last known cost of up to 50 recent sessions so
+a session that spans a day boundary gets the correct `baseline` on its first
+render of the new day:
+```
+<session_key>|<YYYY-MM-DD>|<cost USD>
+e.g. 3f2a…|2026-06-28|5.02
 ```
 
 ## Customization

@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 2026-07-16
+
+- **Fixed**: Claude Sonnet 5 cost estimate used the post-2026-09-01 standard price ($3/$15) year-round instead of the introductory price ($2/$10, in effect through 2026-08-31) that currently applies, overstating estimated cost by ~50% for Azure/Bedrock/Vertex-routed Sonnet 5 sessions in the meantime. The price table now selects the correct rate based on today's date
+- **Fixed**: daily "Today" total was inflated for any session still running when the date rolled over past midnight — `cost.total_cost_usd` is cumulative since session start, not reset at midnight, so the whole pre-midnight portion of a still-open session was being counted as "today's" spend. `cost_budget.cache` now stores a per-session `baseline` (4 fields: `session_key|baseline|banked|latest`, up from 3), and a new cross-day cache `cost_session_state.cache` (never wiped daily) supplies that baseline from the session's last known cost on its first render of a new day, so only the actual post-midnight delta counts. Old 3-field lines are still parsed correctly (treated as `baseline=0`)
+- **Fixed**: a regression introduced while building the above fix — on an intraday `/clear` reset, `baseline` was being set to the just-reset `cost_usd` instead of `0`, causing the pre-reset contribution to be silently dropped from the daily total. Caught by a 6-scenario fake-`HOME` test pass before release
+
 ## 2026-07-15
 
 - **Changed**: Session/Week gauge colors now factor in pace, not just raw usage percentage. A projected end-of-window landing percentage is computed from elapsed time within the 5-hour/7-day window (skipped for the first 5% of the window to avoid noise), using its own thresholds (green <110%, amber 110-150%, red 150%+) since steady/on-pace usage naturally projects to ~100% and shouldn't be flagged. The final color is the more severe of the raw-usage color (existing 60%/80% thresholds) and the pace color, so genuinely high raw usage late in the window still warns regardless of pace
