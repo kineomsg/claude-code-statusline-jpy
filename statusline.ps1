@@ -385,7 +385,7 @@ if ($env:CC_STATUSLINE_JPY -ne '0') {
 # as a best-effort substitute.
 $transcriptPath = $data.transcript_path
 if ([string]::IsNullOrWhiteSpace($transcriptPath) -and -not [string]::IsNullOrWhiteSpace($cwd)) {
-    $projDir = Join-Path $HOME (".claude/projects/" + ($cwd -replace '/', '-'))
+    $projDir = Join-Path $HOME (".claude/projects/" + ($cwd -replace '[\\/:]', '-'))
     if (Test-Path -LiteralPath $projDir) {
         $latest = Get-ChildItem -LiteralPath $projDir -Filter '*.jsonl' -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -548,12 +548,15 @@ if ($null -ne $costUsd) {
         $totalJpy   = [long][Math]::Floor($totalUsd * $jpyRate + 0.5)
         $sessionJpy = [long][Math]::Floor(($costUsd - $baseline) * $jpyRate + 0.5)
 
-        if ($totalJpy -gt 0) {
+        # Gate on totalUsd (not the rounded totalJpy) so a genuine but tiny
+        # spend that rounds to ¥0 (e.g. $0.001) still shows the cost line
+        # instead of vanishing entirely.
+        if ($totalUsd -gt 0) {
             $totalJpyFmt   = "{0:N0}" -f $totalJpy
             $sessionJpyFmt = "{0:N0}" -f $sessionJpy
             if ($isSubscriber) {
                 if ($out) { $out += " " }
-                $out += "${C_DIM}Cost:${C_RESET}${C_GREEN}~`$${costFmt}${C_RESET}${C_DIM}(${C_RESET}${C_GREEN}~¥${totalJpyFmt}${C_DIM})${C_RESET}"
+                $out += "${C_DIM}Cost:${C_RESET}${C_GREEN}~`$${costFmt}${C_DIM}(${C_RESET}${C_GREEN}~¥${totalJpyFmt}${C_DIM})${C_RESET}"
             } elseif ($budgetJpy -gt 0) {
                 $budgetJpyFmt = "{0:N0}" -f $budgetJpy
                 $pct  = [Math]::Min([int][Math]::Floor($totalJpy * 100 / $budgetJpy), 100)

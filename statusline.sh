@@ -421,7 +421,10 @@ if [ -n "$cost_usd" ]; then
         total_jpy=$(awk -v tot="$total_usd" -v rate="$jpy_rate" 'BEGIN {printf "%d", tot * rate + 0.5}')
         session_jpy=$(awk -v cur="$cost_usd" -v base="$baseline" -v rate="$jpy_rate" 'BEGIN {printf "%d", (cur - base) * rate + 0.5}')
 
-        if [ "${total_jpy:-0}" -gt 0 ] 2>/dev/null; then
+        # Gate on total_usd (not the rounded total_jpy) so a genuine but tiny
+        # spend that rounds to ¥0 (e.g. $0.001) still shows the cost line
+        # instead of vanishing entirely.
+        if awk -v tot="$total_usd" 'BEGIN {exit !(tot > 0)}' 2>/dev/null; then
             if [ -n "$is_subscriber" ]; then
                 [ -n "$out" ] && out="$out "
                 out="${out}${C_DIM}Cost:${C_RESET}${C_GREEN}~\$${cost_fmt}${C_DIM}(${C_RESET}${C_GREEN}~¥$(add_commas "$total_jpy")${C_DIM})${C_RESET}"
