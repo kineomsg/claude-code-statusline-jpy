@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## 2026-07-22
+
+- **Changed**: the fallback cost-estimate price table (used for Azure/Bedrock/Vertex-routed sessions, where Claude Code doesn't report `cost.total_cost_usd`) now matches models by family prefix (`claude-opus-4-*`, `claude-sonnet-4-*`, `claude-haiku-4-*`, `claude-(fable|mythos)-*`) instead of listing every exact release ID. A future point release within an existing tier (e.g. a hypothetical `claude-opus-4-9`) is now priced correctly with no code change; only a genuinely new price tier needs a new branch. Applied identically to `statusline.sh` and `statusline.ps1`
+
 ## 2026-07-16
 
 - **Fixed**: Claude Sonnet 5 cost estimate used the post-2026-09-01 standard price ($3/$15) year-round instead of the introductory price ($2/$10, in effect through 2026-08-31) that currently applies, overstating estimated cost by ~50% for Azure/Bedrock/Vertex-routed Sonnet 5 sessions in the meantime. The price table now selects the correct rate based on today's date

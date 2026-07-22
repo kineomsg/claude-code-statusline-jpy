@@ -106,6 +106,20 @@ Then follow the manual settings step below.
 
 ---
 
+## Updating
+
+`install.sh` copies the script into `~/.claude/` — it does not symlink to the cloned repo, so updates aren't picked up automatically. To get the latest version:
+
+```bash
+cd claude-code-statusline
+git pull
+bash install.sh
+```
+
+Then restart Claude Code.
+
+---
+
 ## Manual Setup
 
 ### Linux / macOS / WSL
