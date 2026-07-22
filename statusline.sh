@@ -100,23 +100,23 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 compute_cost_estimate() {
-    # Single streaming pass (no slurp): constant memory even on huge transcripts
+    # Single streaming pass (no slurp): constant memory even on huge transcripts.
+    # Priced by model *family* (prefix match) rather than one entry per exact
+    # release, so a new point release within an existing tier (e.g. a future
+    # claude-opus-4-9) is priced correctly with no code change here — only a
+    # genuinely new price tier needs a new branch.
     jq -Rn --arg today "$(date +%Y-%m-%d)" '
-        {
-          "claude-opus-4-8": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
-          "claude-opus-4-7": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
-          "claude-opus-4-6": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
-          "claude-opus-4-5": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
-          "claude-opus-4-1": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
-          "claude-opus-4-0": {in:5.00, out:25.00, cwrite:6.25, cread:0.50},
-          "claude-sonnet-5": (if $today < "2026-09-01" then {in:2.00, out:10.00, cwrite:2.50, cread:0.20} else {in:3.00, out:15.00, cwrite:3.75, cread:0.30} end),
-          "claude-sonnet-4-6": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
-          "claude-sonnet-4-5": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
-          "claude-sonnet-4-0": {in:3.00, out:15.00, cwrite:3.75, cread:0.30},
-          "claude-haiku-4-5": {in:1.00, out:5.00, cwrite:1.25, cread:0.10},
-          "claude-fable-5": {in:10.00, out:50.00, cwrite:12.50, cread:1.00},
-          "claude-mythos-5": {in:10.00, out:50.00, cwrite:12.50, cread:1.00}
-        } as $p |
+        def sonnet5_rate:
+            if $today < "2026-09-01" then {in:2.00, out:10.00, cwrite:2.50, cread:0.20}
+            else {in:3.00, out:15.00, cwrite:3.75, cread:0.30} end;
+        def price_for($model):
+            if ($model | test("^claude-opus-4-")) then {in:5.00, out:25.00, cwrite:6.25, cread:0.50}
+            elif ($model == "claude-sonnet-5") then sonnet5_rate
+            elif ($model | test("^claude-sonnet-4-")) then {in:3.00, out:15.00, cwrite:3.75, cread:0.30}
+            elif ($model | test("^claude-haiku-4-")) then {in:1.00, out:5.00, cwrite:1.25, cread:0.10}
+            elif ($model | test("^claude-(fable|mythos)-")) then {in:10.00, out:50.00, cwrite:12.50, cread:1.00}
+            else sonnet5_rate  # unrecognized model id: fall back to current-gen Sonnet pricing
+            end;
         def norm_model:
             # us.anthropic.claude-*-20250929-v1:0 (Bedrock cross-region), anthropic.claude-*,
             # claude-*@20250929 (Vertex), claude-*-20250929 (API) all normalize to the bare id
@@ -125,7 +125,7 @@ compute_cost_estimate() {
         reduce (inputs | fromjson? | objects | select(.type == "assistant") | .message // {} | select(.usage)
                 | { model: ((.model // "claude-sonnet-5") | norm_model), u: .usage }) as $m
         (0;
-            . + (($p[$m.model] // $p["claude-sonnet-5"]) as $r |
+            . + ((price_for($m.model)) as $r |
                 (($m.u.input_tokens // 0) * $r.in +
                  ($m.u.output_tokens // 0) * $r.out +
                  ($m.u.cache_creation_input_tokens // 0) * $r.cwrite +

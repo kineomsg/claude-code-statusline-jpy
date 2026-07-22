@@ -25,27 +25,34 @@ function Get-PathLockSuffix($s) {
     } finally { $md5.Dispose() }
 }
 
-function Get-CostEstimate($path) {
-    $sonnet5Rates = if ((Get-Date) -lt [datetime]'2026-09-01') {
-        @{ In = 2.00;  Out = 10.00; CWrite = 2.50;  CRead = 0.20 }
+function Get-Sonnet5Rate {
+    if ((Get-Date) -lt [datetime]'2026-09-01') {
+        return @{ In = 2.00; Out = 10.00; CWrite = 2.50; CRead = 0.20 }
+    }
+    return @{ In = 3.00; Out = 15.00; CWrite = 3.75; CRead = 0.30 }
+}
+
+# Priced by model *family* (prefix match) rather than one entry per exact
+# release, so a new point release within an existing tier (e.g. a future
+# claude-opus-4-9) is priced correctly with no code change here — only a
+# genuinely new price tier needs a new branch.
+function Get-PriceForModel($model) {
+    if ($model -cmatch '^claude-opus-4-') {
+        return @{ In = 5.00; Out = 25.00; CWrite = 6.25; CRead = 0.50 }
+    } elseif ($model -eq 'claude-sonnet-5') {
+        return Get-Sonnet5Rate
+    } elseif ($model -cmatch '^claude-sonnet-4-') {
+        return @{ In = 3.00; Out = 15.00; CWrite = 3.75; CRead = 0.30 }
+    } elseif ($model -cmatch '^claude-haiku-4-') {
+        return @{ In = 1.00; Out = 5.00; CWrite = 1.25; CRead = 0.10 }
+    } elseif ($model -cmatch '^claude-(fable|mythos)-') {
+        return @{ In = 10.00; Out = 50.00; CWrite = 12.50; CRead = 1.00 }
     } else {
-        @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
+        return Get-Sonnet5Rate  # unrecognized model id: fall back to current-gen Sonnet pricing
     }
-    $priceTable = @{
-        'claude-opus-4-8'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
-        'claude-opus-4-7'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
-        'claude-opus-4-6'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
-        'claude-opus-4-5'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
-        'claude-opus-4-1'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
-        'claude-opus-4-0'   = @{ In = 5.00;  Out = 25.00; CWrite = 6.25;  CRead = 0.50 }
-        'claude-sonnet-5'   = $sonnet5Rates
-        'claude-sonnet-4-6' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
-        'claude-sonnet-4-5' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
-        'claude-sonnet-4-0' = @{ In = 3.00;  Out = 15.00; CWrite = 3.75;  CRead = 0.30 }
-        'claude-haiku-4-5'  = @{ In = 1.00;  Out = 5.00;  CWrite = 1.25;  CRead = 0.10 }
-        'claude-fable-5'    = @{ In = 10.00; Out = 50.00; CWrite = 12.50; CRead = 1.00 }
-        'claude-mythos-5'   = @{ In = 10.00; Out = 50.00; CWrite = 12.50; CRead = 1.00 }
-    }
+}
+
+function Get-CostEstimate($path) {
     $defaultKey = 'claude-sonnet-5'
     $total = 0.0
     $lines = $null
@@ -67,8 +74,7 @@ function Get-CostEstimate($path) {
         $model = $model -replace '@.*$', ''
         $model = $model -replace '-v\d+:\d+$', ''
         $model = $model -replace '-\d{8}$', ''
-        $rate = $priceTable[$model]
-        if ($null -eq $rate) { $rate = $priceTable[$defaultKey] }
+        $rate = Get-PriceForModel $model
         $inTok  = if ($null -ne $usage.input_tokens) { [double]$usage.input_tokens } else { 0.0 }
         $outTok = if ($null -ne $usage.output_tokens) { [double]$usage.output_tokens } else { 0.0 }
         $cwTok  = if ($null -ne $usage.cache_creation_input_tokens) { [double]$usage.cache_creation_input_tokens } else { 0.0 }
